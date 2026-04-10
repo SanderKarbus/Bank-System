@@ -222,12 +222,44 @@ app = FastAPI(
 )
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
-bearer_scheme = HTTPBearer(auto_error=False)
+bearer_scheme = HTTPBearer(auto_error=False, scheme_name="BearerAuth", description="JWT token obtained from user registration")
 
 
 @app.get("/")
 async def root():
     return RedirectResponse(url="/docs")
+
+
+def setup_openapi():
+    if app.openapi_schema:
+        return
+    openapi_schema = {
+        "openapi": "3.1.0",
+        "info": {"title": "Branch Bank API", "version": "1.0.0"},
+        "paths": {},
+        "components": {
+            "securitySchemes": {
+                "BearerAuth": {
+                    "type": "http",
+                    "scheme": "bearer",
+                    "bearerFormat": "JWT",
+                    "description": "JWT token obtained from user registration"
+                }
+            }
+        }
+    }
+    app.openapi_schema = openapi_schema
+
+
+@app.on_event("startup")
+def setup_security():
+    setup_openapi()
+    if app.openapi_schema:
+        for path in ["/api/v1/users/{user_id}/accounts", "/api/v1/transfers", "/api/v1/transfers/{transfer_id}"]:
+            if path in app.openapi_schema.get("paths", {}):
+                for method in ["post", "get"]:
+                    if method in app.openapi_schema["paths"][path]:
+                        app.openapi_schema["paths"][path][method]["security"] = [{"BearerAuth": []}]
 
 
 @app.get("/health")
@@ -470,20 +502,3 @@ async def rates():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
-
-
-@app.on_event("startup")
-def setup_security():
-    if app.openapi_schema:
-        app.openapi_schema["components"]["securitySchemes"] = {
-            "BearerAuth": {
-                "type": "http",
-                "scheme": "bearer",
-                "bearerFormat": "JWT",
-                "description": "JWT token obtained from user registration"
-            }
-        }
-        for path in app.openapi_schema["paths"]:
-            for method in app.openapi_schema["paths"][path]:
-                if method in ["get", "post", "put", "delete"]:
-                    app.openapi_schema["paths"][path][method]["security"] = [{"BearerAuth": []}]
