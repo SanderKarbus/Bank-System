@@ -157,7 +157,7 @@ async def lifespan(app: FastAPI):
         central_bank = CentralBankClient(settings.CENTRAL_BANK_URL)
         
         raw_bank_id = settings.BANK_ID or ""
-        bank_id = "" if raw_bank_id.upper() in ("", "NONE", "NULL") else raw_bank_id
+        bank_id = "" if raw_bank_id.upper() in ("", "NONE", "NULL", "UNSET") else raw_bank_id
         logger.info(f"DEBUG settings.BANK_ID={repr(settings.BANK_ID)}, bank_id={repr(bank_id)}")
         
         if bank_id and len(bank_id) >= 3:
