@@ -71,6 +71,7 @@ class Database:
                     pendingSince TEXT,
                     nextRetryAt TEXT,
                     retryCount INTEGER DEFAULT 0,
+                    lastRetryAt TEXT,
                     errorMessage TEXT
                 )
             """)
@@ -203,6 +204,69 @@ class Database:
                 "UPDATE accounts SET balance = ? WHERE accountNumber = ?",
                 (float(new_balance), account_number.upper())
             )
+    
+    def update_balance(self, account_number: str, new_balance: Decimal):
+        with self._cursor() as cursor:
+            cursor.execute(
+                "UPDATE accounts SET balance = ? WHERE accountNumber = ?",
+                (float(new_balance), account_number.upper())
+            )
+    
+    def get_pending_transfers(self) -> list:
+        with self._cursor() as cursor:
+            cursor.execute(
+                "SELECT * FROM transfers WHERE status = 'pending' ORDER BY pendingSince ASC"
+            )
+            rows = cursor.fetchall()
+        return [dict(r) for r in rows]
+    
+    def update_transfer_status(self, transfer_id: str, status: str, error_message: Optional[str] = None):
+        with self._cursor() as cursor:
+            if error_message:
+                cursor.execute(
+                    "UPDATE transfers SET status = ?, errorMessage = ? WHERE transferId = ?",
+                    (status, error_message, transfer_id)
+                )
+            else:
+                cursor.execute(
+                    "UPDATE transfers SET status = ? WHERE transferId = ?",
+                    (status, transfer_id)
+                )
+    
+    def update_transfer_retry(self, transfer_id: str, retry_count: int):
+        from datetime import timedelta
+        delays = [60, 120, 240, 480, 960, 1920, 3600]
+        delay = delays[min(retry_count, len(delays) - 1)]
+        next_retry = datetime.utcnow() + timedelta(seconds=delay)
+        
+        with self._cursor() as cursor:
+            cursor.execute(
+                "UPDATE transfers SET retryCount = ?, nextRetryAt = ?, lastRetryAt = ? WHERE transferId = ?",
+                (retry_count, next_retry.isoformat(), datetime.utcnow().isoformat(), transfer_id)
+            )
+    
+    def save_transfer(self, transfer_data: dict):
+        with self._cursor() as cursor:
+            cursor.execute("""
+                INSERT OR REPLACE INTO transfers 
+                (transferId, status, sourceAccount, destinationAccount, amount, timestamp,
+                 convertedAmount, exchangeRate, rateCapturedAt, pendingSince, nextRetryAt, retryCount, errorMessage)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                transfer_data.get("transferId"),
+                transfer_data.get("status"),
+                transfer_data.get("sourceAccount", "").upper(),
+                transfer_data.get("destinationAccount", "").upper(),
+                transfer_data.get("amount"),
+                transfer_data.get("timestamp"),
+                transfer_data.get("convertedAmount"),
+                transfer_data.get("exchangeRate"),
+                transfer_data.get("rateCapturedAt"),
+                transfer_data.get("pendingSince"),
+                transfer_data.get("nextRetryAt"),
+                transfer_data.get("retryCount", 0),
+                transfer_data.get("errorMessage")
+            ))
     
     def create_transfer(self, transferId: str, status: str, sourceAccount: str,
                        destinationAccount: str, amount: str, timestamp: datetime,
