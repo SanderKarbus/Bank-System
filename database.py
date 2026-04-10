@@ -11,7 +11,12 @@ USE_POSTGRES = os.getenv("DATABASE_URL", "").startswith("postgresql")
 
 class Database:
     def __init__(self, db_path: str = None):
-        self.db_path = db_path or os.getenv("DATABASE_PATH", "bank.db")
+        if db_path:
+            self.db_path = db_path
+        elif os.getenv("RAILWAY_VOLUME_MOUNT_PATH"):
+            self.db_path = os.path.join(os.getenv("RAILWAY_VOLUME_MOUNT_PATH"), "bank.db")
+        else:
+            self.db_path = os.getenv("DATABASE_PATH", "bank.db")
         self._connection = None
         
         if USE_POSTGRES:
