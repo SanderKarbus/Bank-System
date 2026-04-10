@@ -455,3 +455,15 @@ async def receive_inter_bank_transfer(request: InterBankTransferRequest):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+from fastapi.responses import RedirectResponse
+
+@app.get("/")
+async def root():
+    return RedirectResponse(url="/docs")
+
+
+@app.get("/openapi.yaml")
+async def openapi_yaml():
+    return app.openapi()
