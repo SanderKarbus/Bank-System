@@ -11,8 +11,8 @@ Distributed Banking System branch bank that communicates with the central bank.
 ## Technologies
 
 - **Python 3.11** + **FastAPI**
-- **SQLite** database with proper transactions
-- **JWT (HS256)** user authentication
+- **PostgreSQL** database (persistent storage on Railway)
+- **JWT (HS256)** user authentication (1 year token)
 - **JWT (ES256)** cross-bank authentication
 - **Railway** hosting
 - **APScheduler** for background tasks
@@ -143,7 +143,7 @@ CREATE INDEX idx_transfers_dest ON transfers(destinationAccount);
 
 1. **Register User** - `POST /api/v1/users`
    - Returns user data + access token
-   - Token expires in 24 hours
+   - Token expires in 1 year
 
 2. **Use Token** - Add to all protected requests:
    ```
