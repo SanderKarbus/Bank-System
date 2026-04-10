@@ -5,10 +5,9 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Header, Depends, Query
+from fastapi import FastAPI, HTTPException, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
-from fastapi.security import HTTPBearer
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -22,6 +21,7 @@ from database import Database
 from central_bank_client import CentralBankClient
 from key_manager import key_manager
 from auth import create_user_token, verify_token, invalidate_token
+from security import verify_user
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -33,22 +33,6 @@ bank_prefix = "XXX"
 bank_id = None
 
 _bank_cache = {"data": None, "last_synced": None}
-
-
-def verify_user(authorization: str = Header(None)) -> dict:
-    if not authorization:
-        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "Bearer token required"}, headers={"WWW-Authenticate": "Bearer"})
-    
-    if authorization.startswith("Bearer "):
-        token = authorization[7:]
-    else:
-        token = authorization
-    
-    payload = verify_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "Invalid or expired token"}, headers={"WWW-Authenticate": "Bearer"})
-    
-    return payload
 
 
 async def get_cached_banks():
@@ -222,44 +206,33 @@ app = FastAPI(
 )
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
-bearer_scheme = HTTPBearer(auto_error=False, scheme_name="BearerAuth", description="JWT token obtained from user registration")
+original_openapi = app.openapi
+
+def patched_openapi():
+    schema = original_openapi()
+    if "components" not in schema:
+        schema["components"] = {}
+    if "securitySchemes" not in schema["components"]:
+        schema["components"]["securitySchemes"] = {}
+    schema["components"]["securitySchemes"]["BearerAuth"] = schema["components"]["securitySchemes"].pop("HTTPBearer", {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+    })
+    for path in schema.get("paths", {}):
+        for method in schema["paths"][path]:
+            if "security" in schema["paths"][path][method]:
+                for i, sec in enumerate(schema["paths"][path][method]["security"]):
+                    if "HTTPBearer" in sec:
+                        schema["paths"][path][method]["security"][i] = {"BearerAuth": []}
+    return schema
+
+app.openapi = patched_openapi
 
 
 @app.get("/")
 async def root():
     return RedirectResponse(url="/docs")
-
-
-def setup_openapi():
-    if app.openapi_schema:
-        return
-    openapi_schema = {
-        "openapi": "3.1.0",
-        "info": {"title": "Branch Bank API", "version": "1.0.0"},
-        "paths": {},
-        "components": {
-            "securitySchemes": {
-                "BearerAuth": {
-                    "type": "http",
-                    "scheme": "bearer",
-                    "bearerFormat": "JWT",
-                    "description": "JWT token obtained from user registration"
-                }
-            }
-        }
-    }
-    app.openapi_schema = openapi_schema
-
-
-@app.on_event("startup")
-def setup_security():
-    setup_openapi()
-    if app.openapi_schema:
-        for path in ["/api/v1/users/{user_id}/accounts", "/api/v1/transfers", "/api/v1/transfers/{transfer_id}"]:
-            if path in app.openapi_schema.get("paths", {}):
-                for method in ["post", "get"]:
-                    if method in app.openapi_schema["paths"][path]:
-                        app.openapi_schema["paths"][path][method]["security"] = [{"BearerAuth": []}]
 
 
 @app.get("/health")
