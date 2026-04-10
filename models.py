@@ -49,6 +49,7 @@ class UserRegistrationResponse(BaseModel):
     fullName: str
     email: Optional[str] = None
     createdAt: datetime
+    token: Optional[dict] = None
 
 
 class AccountCreationRequest(BaseModel):
