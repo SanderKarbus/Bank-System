@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Header, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
+from fastapi.security import HTTPBearer
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -217,9 +218,17 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
     docs_url="/docs",
-    openapi_url="/openapi.json"
+    openapi_url="/openapi.json",
+    swagger_ui_init_oauth={
+        "clientId": "swagger-ui",
+        "useBasicAuthentication": True,
+    }
 )
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+
+bearer_scheme = HTTPBearer(auto_error=False)
+
+app.security = bearer_scheme
 
 
 @app.get("/")
