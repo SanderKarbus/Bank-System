@@ -361,7 +361,8 @@ async def transfer(req: TransferRequest, auth: dict = Depends(verify_user)):
         raise HTTPException(status_code=404, detail={"code": "ACCOUNT_NOT_FOUND", "message": "Source account not found"})
     
     amount = Decimal(req.amount)
-    if source["balance"] < amount:
+    source_balance = Decimal(str(source["balance"]))
+    if source_balance < amount:
         raise HTTPException(status_code=422, detail={"code": "INSUFFICIENT_FUNDS", "message": "Insufficient funds in source account"})
     
     dest_prefix = req.destinationAccount[:3].upper()
@@ -432,7 +433,7 @@ async def transfer(req: TransferRequest, auth: dict = Depends(verify_user)):
             raise HTTPException(status_code=404, detail={"code": "ACCOUNT_NOT_FOUND", "message": "Destination account not found"})
         db.update_balance(req.destinationAccount.upper(), Decimal(dest["balance"]) + amount)
     
-    db.update_balance(req.sourceAccount.upper(), Decimal(source["balance"]) - amount)
+    db.update_balance(req.sourceAccount.upper(), source_balance - amount)
     db.save_transfer(result)
     return result
 
