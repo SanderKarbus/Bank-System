@@ -430,9 +430,9 @@ async def transfer(req: TransferRequest, auth: dict = Depends(verify_user)):
         dest = db.get_account(req.destinationAccount.upper())
         if not dest:
             raise HTTPException(status_code=404, detail={"code": "ACCOUNT_NOT_FOUND", "message": "Destination account not found"})
-        db.update_balance(req.destinationAccount.upper(), dest["balance"] + amount)
+        db.update_balance(req.destinationAccount.upper(), Decimal(dest["balance"]) + amount)
     
-    db.update_balance(req.sourceAccount.upper(), source["balance"] - amount)
+    db.update_balance(req.sourceAccount.upper(), Decimal(source["balance"]) - amount)
     db.save_transfer(result)
     return result
 
@@ -466,7 +466,7 @@ async def receive_transfer(req: InterBankTransferRequest):
         raise HTTPException(status_code=404, detail={"code": "ACCOUNT_NOT_FOUND", "message": "Destination account not found"})
     
     amount = Decimal(payload["amount"])
-    db.update_balance(payload["destinationAccount"], account["balance"] + amount)
+    db.update_balance(payload["destinationAccount"], Decimal(account["balance"]) + amount)
     
     return {
         "transferId": payload["transferId"],
