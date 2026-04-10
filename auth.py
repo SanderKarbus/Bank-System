@@ -6,7 +6,7 @@ from jose import jwt, ExpiredSignatureError
 
 SECRET_KEY = os.getenv("JWT_SECRET", secrets.token_hex(32))
 ALGORITHM = "HS256"
-TOKEN_EXPIRE_HOURS = 24
+TOKEN_EXPIRE_HOURS = 8760
 
 
 def create_user_token(user_id: str, full_name: str) -> dict:
