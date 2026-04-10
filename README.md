@@ -33,7 +33,7 @@ Distributed Banking System branch bank that communicates with the central bank.
 │  - Exchange rates    │ Bank lookup                            │
 ├─────────────────────────────────────────────────────────────────┤
 │                      Database Layer                             │
-│  SQLite with transactions for data integrity                    │
+│  PostgreSQL with ACID transactions for data integrity          │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -42,7 +42,7 @@ Distributed Banking System branch bank that communicates with the central bank.
 | Service | Responsibility |
 |---------|---------------|
 | `main.py` | FastAPI app, routing, business logic |
-| `database.py` | SQLite operations, data persistence |
+| `database.py` | PostgreSQL operations, data persistence |
 | `central_bank_client.py` | Central Bank API integration |
 | `auth.py` | JWT token generation and verification |
 | `key_manager.py` | EC key pair for cross-bank JWT signing |
@@ -200,9 +200,11 @@ python main.py
 |----------|-------------|---------|
 | BANK_NAME | Bank name | "My Branch Bank" |
 | BANK_ADDRESS | Bank URL (https:// automatically added) | "http://localhost:8000" |
-| BANK_ID | Central bank assigned ID | Auto-register |
+| BANK_ID | Central bank assigned ID (e.g. MIN001) | Auto-register |
 | CENTRAL_BANK_URL | Central bank API URL | "https://test.diarainfra.com/central-bank/api/v1" |
 | HEARTBEAT_INTERVAL_MINUTES | Heartbeat interval | 25 |
+| DATABASE_URL | PostgreSQL connection string | Required for production |
+| JWT_SECRET | Secret key for JWT tokens | Required for production |
 
 ## Examples
 
