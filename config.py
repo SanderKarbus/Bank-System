@@ -4,7 +4,13 @@ import secrets
 
 class Settings:
     BANK_NAME: str = os.getenv("BANK_NAME", "My Branch Bank")
-    BANK_ADDRESS: str = os.getenv("BANK_ADDRESS", "http://localhost:8000")
+    _bank_address_raw: str = os.getenv("BANK_ADDRESS", "http://localhost:8000")
+    @property
+    def BANK_ADDRESS(self) -> str:
+        addr = self._bank_address_raw
+        if addr and not addr.startswith("http://") and not addr.startswith("https://"):
+            addr = "https://" + addr
+        return addr
     CENTRAL_BANK_URL: str = os.getenv("CENTRAL_BANK_URL", "https://test.diarainfra.com/central-bank/api/v1")
     
     PRIVATE_KEY_PATH: str = os.getenv("PRIVATE_KEY_PATH", "keys/private_key.pem")

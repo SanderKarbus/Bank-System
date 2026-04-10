@@ -9,4 +9,6 @@ COPY . .
 
 RUN mkdir -p keys
 
+ENV BANK_ID=MYB001
+
 CMD ["python", "main.py"]

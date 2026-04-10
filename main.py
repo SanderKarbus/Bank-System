@@ -63,10 +63,11 @@ async def lifespan(app: FastAPI):
         private_key, public_key = key_manager.generate_ec_keys()
         central_bank = CentralBankClient(settings.CENTRAL_BANK_URL)
         
-        bank_id = settings.BANK_ID or ""
+        raw_bank_id = settings.BANK_ID or ""
+        bank_id = "" if raw_bank_id.upper() in ("", "NONE", "NULL") else raw_bank_id
         logger.info(f"DEBUG settings.BANK_ID={repr(settings.BANK_ID)}, bank_id={repr(bank_id)}")
         
-        if bank_id:
+        if bank_id and len(bank_id) >= 3:
             bank_prefix = bank_id[:3]
             try:
                 await central_bank.send_heartbeat(bank_id)
