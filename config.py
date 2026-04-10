@@ -14,7 +14,7 @@ class Settings:
     
     DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./bank.db")
     
-    JWT_SECRET: str = os.getenv("JWT_SECRET", secrets.token_hex(32))
+    BANK_ID: str = os.getenv("BANK_ID", "")
 
 
 settings = Settings()
