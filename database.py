@@ -8,6 +8,9 @@ from contextlib import contextmanager
 
 USE_POSTGRES = os.getenv("DATABASE_URL", "").startswith("postgresql")
 
+if USE_POSTGRES:
+    import psycopg2
+
 
 class Database:
     def __init__(self, db_path: str = None):
