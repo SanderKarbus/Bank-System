@@ -12,12 +12,31 @@ class TransferStatus(str, Enum):
     FAILED_TIMEOUT = "failed_timeout"
 
 
+class TransferStatusEnum(str, Enum):
+    COMPLETED = "completed"
+    FAILED = "failed"
+    PENDING = "pending"
+    FAILED_TIMEOUT = "failed_timeout"
+
+
 class Currency(str, Enum):
     EUR = "EUR"
     USD = "USD"
     GBP = "GBP"
     SEK = "SEK"
     LVL = "LVL"
+
+
+class BearerToken(BaseModel):
+    accessToken: str
+    tokenType: str = "Bearer"
+    expiresAt: datetime
+
+
+class BearerTokenResponse(BaseModel):
+    accessToken: str
+    tokenType: str = "Bearer"
+    expiresAt: datetime
 
 
 class UserRegistrationRequest(BaseModel):

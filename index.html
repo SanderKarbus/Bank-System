@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="et">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Panga Süsteem - Test</title>
+    <style>
+        * { box-sizing: border-box; font-family: 'Segoe UI', sans-serif; }
+        body { max-width: 1200px; margin: 0 auto; padding: 20px; background: #f5f5f5; }
+        h1 { color: #2c3e50; text-align: center; }
+        h2 { color: #34495e; border-bottom: 2px solid #3498db; padding-bottom: 10px; }
+        
+        .card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 15px 0;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .section {
+            background: #fff;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 15px 0;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        input, select, button {
+            padding: 10px 15px;
+            margin: 5px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        
+        input:focus, select:focus {
+            outline: none;
+            border-color: #3498db;
+        }
+        
+        button {
+            background: #3498db;
+            color: white;
+            cursor: pointer;
+            border: none;
+            font-weight: bold;
+        }
+        
+        button:hover { background: #2980b9; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        button.success { background: #27ae60; }
+        button.danger { background: #e74c3c; }
+        
+        .result {
+            background: #ecf0f1;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 10px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .error { color: #e74c3c; }
+        .success { color: #27ae60; }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+        
+        th, td {
+            border: 1px solid #ddd;
+            padding: 10px;
+            text-align: left;
+        }
+        
+        th { background: #3498db; color: white; }
+        tr:nth-child(even) { background: #f9f9f9; }
+        
+        .user-info {
+            background: #2ecc71;
+            color: white;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            display: none;
+        }
+        
+        .user-info.active { display: block; }
+        
+        .flex { display: flex; gap: 10px; flex-wrap: wrap; }
+        .flex > * { flex: 1; min-width: 200px; }
+        
+        label { display: block; margin-top: 10px; font-weight: bold; color: #555; }
+        
+        .hidden { display: none !important; }
+        
+        #status {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            padding: 10px 20px;
+            border-radius: 5px;
+            font-weight: bold;
+            display: none;
+        }
+        #status.show { display: block; }
+        #status.success { background: #27ae60; color: white; }
+        #status.error { background: #e74c3c; color: white; }
+    </style>
+</head>
+<body>
+    <div id="status"></div>
+    
+    <h1>🏦 Pangasüsteem - Test Interface</h1>
+    
+    <!-- Bank Info -->
+    <div class="section">
+        <h2>📊 Panga Info</h2>
+        <button onclick="getBankInfo()">Lae Panga Info</button>
+        <div id="bankInfo" class="result"></div>
+    </div>
+    
+    <!-- User Registration -->
+    <div class="section" id="registerSection">
+        <h2>👤 Kasutaja Registreerimine</h2>
+        <div class="flex">
+            <div>
+                <label>Nimi:</label>
+                <input type="text" id="fullName" placeholder="Sisesta nimi">
+            </div>
+            <div>
+                <label>Email:</label>
+                <input type="email" id="email" placeholder="email@example.com">
+            </div>
+        </div>
+        <button onclick="registerUser()">Registreeri Kasutaja</button>
+        <div id="registerResult" class="result"></div>
+    </div>
+    
+    <!-- User Info (shown after registration) -->
+    <div class="user-info" id="userInfo">
+        <h3>✅ Kasutaja Registreeritud!</h3>
+        <p><strong>ID:</strong> <span id="userIdDisplay"></span></p>
+        <p><strong>Nimi:</strong> <span id="userNameDisplay"></span></p>
+    </div>
+    
+    <!-- Account Creation -->
+    <div class="section hidden" id="accountSection">
+        <h2>💳 Konto Loomine</h2>
+        <label>Valuuta:</label>
+        <select id="currency">
+            <option value="EUR">EUR - Euro</option>
+            <option value="USD">USD - USA Dollar</option>
+            <option value="GBP">GBP - Briti Nael</option>
+            <option value="SEK">SEK - Rootsi Kroon</option>
+        </select>
+        <button class="success" onclick="createAccount()">Loo Konto</button>
+        <div id="accountResult" class="result"></div>
+    </div>
+    
+    <!-- My Accounts -->
+    <div class="section hidden" id="myAccountsSection">
+        <h2>📋 Minu Kontod</h2>
+        <table id="accountsTable">
+            <thead>
+                <tr>
+                    <th>Konto Number</th>
+                    <th>Valuuta</th>
+                    <th>Saldo</th>
+                    <th>Tegevused</th>
+                </tr>
+            </thead>
+            <tbody id="accountsBody"></tbody>
+        </table>
+    </div>
+    
+    <!-- Account Lookup -->
+    <div class="section">
+        <h2>🔍 Konto Otsing</h2>
+        <input type="text" id="lookupAccount" placeholder="Konto number (nt. MYBXXXXX)">
+        <button onclick="lookupAccount()">Otsi</button>
+        <div id="lookupResult" class="result"></div>
+    </div>
+    
+    <!-- Transfer -->
+    <div class="section hidden" id="transferSection">
+        <h2>💸 Ülekanne</h2>
+        <div class="flex">
+            <div>
+                <label>Saatja Konto:</label>
+                <select id="sourceAccount"></select>
+            </div>
+            <div>
+                <label>Saaja Konto:</label>
+                <input type="text" id="destAccount" placeholder="MYBXXXXX või TAKXXXXX">
+            </div>
+            <div>
+                <label>Summa:</label>
+                <input type="text" id="amount" placeholder="100.00">
+            </div>
+        </div>
+        <button class="success" onclick="initiateTransfer()">Teosta Ülekanne</button>
+        <div id="transferResult" class="result"></div>
+    </div>
+    
+    <!-- Other Banks -->
+    <div class="section">
+        <h2>🏦 Teised Pangad (Keskpangast)</h2>
+        <button onclick="getCentralBankBanks()">Lae Pangad</button>
+        <div id="centralBanksResult" class="result"></div>
+    </div>
+    
+    <!-- Exchange Rates -->
+    <div class="section">
+        <h2>💱 Valuutakursid</h2>
+        <button onclick="getExchangeRates()">Lae Kursid</button>
+        <div id="exchangeRatesResult" class="result"></div>
+    </div>
+
+    <script>
+        const API_BASE = window.location.origin;
+        
+        let currentUserId = null;
+        let accounts = [];
+        
+        function showStatus(message, isError = false) {
+            const el = document.getElementById('status');
+            el.textContent = message;
+            el.className = 'show ' + (isError ? 'error' : 'success');
+            setTimeout(() => el.className = '', 3000);
+        }
+        
+        function show(id, html) {
+            document.getElementById(id).innerHTML = html;
+        }
+        
+        async function apiCall(url, method = 'GET', body = null) {
+            try {
+                const options = {
+                    method,
+                    headers: { 'Content-Type': 'application/json' }
+                };
+                if (body) options.body = JSON.stringify(body);
+                
+                const response = await fetch(url, options);
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.detail?.message || data.message || JSON.stringify(data));
+                }
+                
+                return { ok: true, data, status: response.status };
+            } catch (error) {
+                return { ok: false, error: error.message };
+            }
+        }
+        
+        async function getBankInfo() {
+            const result = await apiCall(`${API_BASE}/health`);
+            if (result.ok) {
+                show('bankInfo', `<span class="success">Pank on online!</span>\n\nPanga ID: ${result.data.bankId || 'Ei registreeritud'}\nStatus: ${result.data.status}\nAeg: ${result.data.timestamp}`);
+            } else {
+                show('bankInfo', `<span class="error">Viga: ${result.error}</span>`);
+            }
+        }
+        
+        async function registerUser() {
+            const fullName = document.getElementById('fullName').value;
+            const email = document.getElementById('email').value;
+            
+            if (!fullName) {
+                show('registerResult', '<span class="error">Nimi on kohustuslik!</span>');
+                return;
+            }
+            
+            const result = await apiCall(`${API_BASE}/api/v1/users`, 'POST', {
+                fullName,
+                email: email || undefined
+            });
+            
+            if (result.ok) {
+                currentUserId = result.data.userId;
+                document.getElementById('userIdDisplay').textContent = currentUserId;
+                document.getElementById('userNameDisplay').textContent = result.data.fullName;
+                document.getElementById('userInfo').classList.add('active');
+                document.getElementById('accountSection').classList.remove('hidden');
+                document.getElementById('transferSection').classList.remove('hidden');
+                document.getElementById('myAccountsSection').classList.remove('hidden');
+                show('registerResult', `<span class="success">Kasutaja registreeritud!</span>\n\nID: ${result.data.userId}\nNimi: ${result.data.fullName}\nEmail: ${result.data.email || 'Puudub'}\nLoodud: ${result.data.createdAt}`);
+                showStatus('Kasutaja registreeritud!');
+            } else {
+                show('registerResult', `<span class="error">Viga: ${result.error}</span>`);
+            }
+        }
+        
+        async function createAccount() {
+            if (!currentUserId) {
+                show('accountResult', '<span class="error">Registreeri esmalt kasutaja!</span>');
+                return;
+            }
+            
+            const currency = document.getElementById('currency').value;
+            
+            const result = await apiCall(`${API_BASE}/api/v1/users/${currentUserId}/accounts`, 'POST', {
+                currency
+            }, { 'X-User-Id': currentUserId });
+            
+            if (result.ok) {
+                accounts.push(result.data);
+                updateAccountsTable();
+                updateAccountSelects();
+                show('accountResult', `<span class="success">Konto loodud!</span>\n\nKonto: ${result.data.accountNumber}\nValuuta: ${result.data.currency}\nSaldo: ${result.data.balance}\nOmanik: ${result.data.ownerId}`);
+                showStatus('Konto loodud!');
+            } else {
+                show('accountResult', `<span class="error">Viga: ${result.error}</span>`);
+            }
+        }
+        
+        function updateAccountsTable() {
+            const tbody = document.getElementById('accountsBody');
+            if (accounts.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4">Kontosid pole</td></tr>';
+                return;
+            }
+            tbody.innerHTML = accounts.map(acc => `
+                <tr>
+                    <td><strong>${acc.accountNumber}</strong></td>
+                    <td>${acc.currency}</td>
+                    <td>${acc.balance} ${acc.currency}</td>
+                    <td><button onclick="depositMoney('${acc.accountNumber}')">Lisa raha (test)</button></td>
+                </tr>
+            `).join('');
+        }
+        
+        function updateAccountSelects() {
+            const select = document.getElementById('sourceAccount');
+            select.innerHTML = accounts.map(acc => 
+                `<option value="${acc.accountNumber}">${acc.accountNumber} (${acc.balance} ${acc.currency})</option>`
+            ).join('');
+        }
+        
+        async function depositMoney(accountNumber) {
+            const amount = prompt('Sisesta summa lisamiseks:');
+            if (!amount) return;
+            
+            const acc = accounts.find(a => a.accountNumber === accountNumber);
+            if (acc) {
+                acc.balance = (parseFloat(acc.balance) + parseFloat(amount)).toFixed(2);
+                updateAccountsTable();
+                showStatus(`${amount} lisatud kontole ${accountNumber}`);
+            }
+        }
+        
+        async function lookupAccount() {
+            const accountNumber = document.getElementById('lookupAccount').value.toUpperCase();
+            if (!accountNumber) {
+                show('lookupResult', '<span class="error">Sisesta konto number!</span>');
+                return;
+            }
+            
+            const result = await apiCall(`${API_BASE}/api/v1/accounts/${accountNumber}`);
+            
+            if (result.ok) {
+                show('lookupResult', `<span class="success">Konto leitud!</span>\n\nKonto: ${result.data.accountNumber}\nOmanik: ${result.data.ownerName}\nValuuta: ${result.data.currency}`);
+            } else {
+                show('lookupResult', `<span class="error">Kontot ei leitud: ${result.error}</span>`);
+            }
+        }
+        
+        async function initiateTransfer() {
+            if (!currentUserId) {
+                show('transferResult', '<span class="error">Registreeri esmalt kasutaja!</span>');
+                return;
+            }
+            
+            const sourceAccount = document.getElementById('sourceAccount').value;
+            const destAccount = document.getElementById('destAccount').value.toUpperCase();
+            const amount = document.getElementById('amount').value;
+            
+            if (!sourceAccount || !destAccount || !amount) {
+                show('transferResult', '<span class="error">Täida kõik väljad!</span>');
+                return;
+            }
+            
+            const transferId = 'transfer-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+            
+            const result = await apiCall(`${API_BASE}/api/v1/transfers`, 'POST', {
+                transferId,
+                sourceAccount,
+                destinationAccount: destAccount,
+                amount: parseFloat(amount).toFixed(2)
+            }, { 'X-User-Id': currentUserId });
+            
+            if (result.ok) {
+                const data = result.data;
+                let output = `<span class="success">Ülekanne tehtud!</span>\n\n`;
+                output += `ID: ${data.transferId}\n`;
+                output += `Staatus: ${data.status}\n`;
+                output += `Saatja: ${data.sourceAccount}\n`;
+                output += `Saaja: ${data.destinationAccount}\n`;
+                output += `Summa: ${data.amount}\n`;
+                if (data.convertedAmount) {
+                    output += `Teisendatud: ${data.convertedAmount}\n`;
+                    output += `Kurss: ${data.exchangeRate}\n`;
+                }
+                show('transferResult', output);
+                showStatus('Ülekanne tehtud!');
+            } else {
+                show('transferResult', `<span class="error">Viga: ${result.error}</span>`);
+            }
+        }
+        
+        async function getCentralBankBanks() {
+            const result = await apiCall(`${API_BASE}/api/v1/central-bank/banks`);
+            
+            if (result.ok) {
+                const banks = result.data.banks;
+                let table = `<table>
+                    <tr><th>Panga ID</th><th>Nimi</th><th>Aadress</th><th>Viimane Heartbeat</th></tr>`;
+                banks.forEach(bank => {
+                    table += `<tr>
+                        <td>${bank.bankId}</td>
+                        <td>${bank.name}</td>
+                        <td>${bank.address}</td>
+                        <td>${bank.lastHeartbeat}</td>
+                    </tr>`;
+                });
+                table += '</table>';
+                show('centralBanksResult', table);
+            } else {
+                show('centralBanksResult', `<span class="error">Viga: ${result.error}</span>`);
+            }
+        }
+        
+        async function getExchangeRates() {
+            const result = await apiCall(`${API_BASE}/api/v1/central-bank/exchange-rates`);
+            
+            if (result.ok) {
+                const data = result.data;
+                let output = `<span class="success">Valuutakursid</span>\n`;
+                output += `Baasvaluuta: ${data.baseCurrency}\n`;
+                output += `Viimane uuendus: ${data.timestamp}\n\n`;
+                for (const [currency, rate] of Object.entries(data.rates)) {
+                    output += `${currency}: ${rate}\n`;
+                }
+                show('exchangeRatesResult', output);
+            } else {
+                show('exchangeRatesResult', `<span class="error">Viga: ${result.error}</span>`);
+            }
+        }
+        
+        // Helper to add header
+        function apiCall(url, method, body, headers = {}) {
+            return fetch(url, {
+                method,
+                headers: { 'Content-Type': 'application/json', ...headers },
+                body: body ? JSON.stringify(body) : null
+            }).then(r => r.json()).then(data => {
+                if (data.detail) throw new Error(data.detail);
+                return data;
+            }).catch(err => { throw err; });
+        }
+    </script>
+</body>
+</html>

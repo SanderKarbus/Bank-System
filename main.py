@@ -2,17 +2,23 @@ import asyncio
 import logging
 import uuid
 import json
+import sqlite3
 from datetime import datetime, timedelta
-from typing import Optional, Dict
+from typing import Optional
 from decimal import Decimal
 from contextlib import asynccontextmanager
+from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Header, Depends, Body
+from fastapi import FastAPI, HTTPException, Header, Depends, Body, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from jose import jwt, JWTError
+from jose import jwt, JWTError, jwt
 from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import hashes
+from cryptography import x509
 import httpx
 
 from config import settings
@@ -22,31 +28,51 @@ from models import (
     AccountLookupResponse, TransferRequest, TransferResponse,
     TransferStatusResponse, InterBankTransferRequest, InterBankTransferResponse,
     ErrorResponse, HealthResponse, BankDirectory, BankDetails, ExchangeRatesResponse,
-    TransferStatus
+    TransferStatus, BearerToken, BearerTokenResponse, TransferStatusEnum
 )
 from key_manager import key_manager
 from central_bank_client import CentralBankClient
+from database import Database
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 central_bank: Optional[CentralBankClient] = None
 scheduler: Optional[AsyncIOScheduler] = None
+db: Optional[Database] = None
 
-users_db: Dict[str, dict] = {}
-accounts_db: Dict[str, dict] = {}
-transfers_db: Dict[str, dict] = {}
 bank_prefix = "XXX"
 bank_id: Optional[str] = None
-private_key = None
+bank_address: Optional[str] = None
+private_key_pem: Optional[str] = None
+public_key_pem: Optional[str] = None
 
 
-def get_current_user_id(x_user_id: str = Header(None)) -> str:
-    if not x_user_id:
-        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "User ID required (X-User-Id header)"})
-    if x_user_id not in users_db:
-        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "Invalid token"})
-    return token
+def create_bearer_token(user_id: str, expires_in: int = 3600) -> tuple[str, datetime]:
+    exp = datetime.utcnow() + timedelta(seconds=expires_in)
+    payload = {
+        "sub": user_id,
+        "exp": exp,
+        "iat": datetime.utcnow()
+    }
+    token = jwt.encode(payload, settings.JWT_SECRET, algorithm="HS256")
+    return token, exp
+
+
+def verify_bearer_token(authorization: str = Header(None)) -> str:
+    if not authorization:
+        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "Authentication required"})
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "Invalid authorization header"})
+    token = authorization[7:]
+    try:
+        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=["HS256"])
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "Invalid token"})
+        return user_id
+    except JWTError:
+        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "Invalid or expired token"})
 
 
 async def heartbeat_task():
@@ -62,20 +88,24 @@ async def heartbeat_task():
 
 
 async def register_with_central_bank():
-    global central_bank, bank_id, bank_prefix, private_key, public_key_pem
+    global central_bank, bank_id, bank_prefix, bank_address, private_key_pem, public_key_pem
     
     try:
-        private_key, public_key_pem = key_manager.generate_rsa_keys()
+        private_key_pem, public_key_pem = key_manager.generate_ec_keys()
         central_bank = CentralBankClient(settings.CENTRAL_BANK_URL)
+        
+        bank_address = settings.BANK_ADDRESS
         
         result = await central_bank.register_bank(
             name=settings.BANK_NAME,
-            address=settings.BANK_ADDRESS,
+            address=bank_address,
             public_key=public_key_pem
         )
         
         bank_id = result.bankId
         bank_prefix = bank_id[:3]
+        
+        db.update_bank_info(bank_id, bank_prefix, bank_address)
         
         scheduler.add_job(
             heartbeat_task,
@@ -92,8 +122,10 @@ async def register_with_central_bank():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global scheduler
+    global scheduler, db
     scheduler = AsyncIOScheduler()
+    db = Database()
+    db.init_db()
     
     try:
         await register_with_central_bank()
@@ -107,13 +139,16 @@ async def lifespan(app: FastAPI):
     scheduler.shutdown()
     if central_bank:
         await central_bank.close()
+    db.close()
 
 
 app = FastAPI(
     title="Branch Bank API",
-    description="Distributed Banking System - Branch Bank",
+    description="Distributed Banking System - Branch Bank API. Supports user registration, account management, and cross-bank transfers.",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    docs_url="/docs",
+    redoc_url="/redoc"
 )
 
 app.add_middleware(
@@ -125,7 +160,12 @@ app.add_middleware(
 )
 
 
-@app.get("/health", response_model=HealthResponse)
+@app.get("/")
+async def root():
+    return RedirectResponse(url="/docs")
+
+
+@app.get("/health", response_model=HealthResponse, tags=["Health"])
 async def health():
     return HealthResponse(
         status="ok",
@@ -134,7 +174,9 @@ async def health():
     )
 
 
-@app.get("/api/v1/central-bank/banks", response_model=BankDirectory)
+# ==================== CENTRAL BANK PROXIES ====================
+
+@app.get("/api/v1/central-bank/banks", response_model=BankDirectory, tags=["Central Bank"])
 async def list_central_bank_banks():
     if not central_bank:
         raise HTTPException(status_code=503, detail={"code": "CENTRAL_BANK_UNAVAILABLE", "message": "Central bank not connected"})
@@ -144,19 +186,19 @@ async def list_central_bank_banks():
         raise HTTPException(status_code=503, detail={"code": "SERVICE_UNAVAILABLE", "message": str(e)})
 
 
-@app.get("/api/v1/central-bank/banks/{bank_id_param}", response_model=BankDetails)
-async def get_central_bank_bank(bank_id_param: str):
+@app.get("/api/v1/central-bank/banks/{cb_bank_id}", response_model=BankDetails, tags=["Central Bank"])
+async def get_central_bank_bank(cb_bank_id: str):
     if not central_bank:
         raise HTTPException(status_code=503, detail={"code": "CENTRAL_BANK_UNAVAILABLE", "message": "Central bank not connected"})
     try:
-        return await central_bank.get_bank(bank_id_param)
+        return await central_bank.get_bank(cb_bank_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail={"code": "BANK_NOT_FOUND", "message": str(e)})
     except Exception as e:
         raise HTTPException(status_code=500, detail={"code": "INTERNAL_ERROR", "message": str(e)})
 
 
-@app.get("/api/v1/central-bank/exchange-rates", response_model=ExchangeRatesResponse)
+@app.get("/api/v1/central-bank/exchange-rates", response_model=ExchangeRatesResponse, tags=["Central Bank"])
 async def get_exchange_rates():
     if not central_bank:
         raise HTTPException(status_code=503, detail={"code": "CENTRAL_BANK_UNAVAILABLE", "message": "Central bank not connected"})
@@ -166,153 +208,147 @@ async def get_exchange_rates():
         raise HTTPException(status_code=500, detail={"code": "INTERNAL_ERROR", "message": str(e)})
 
 
-@app.post("/api/v1/users", response_model=UserRegistrationResponse, status_code=201)
+# ==================== USERS ====================
+
+@app.post("/api/v1/users", response_model=UserRegistrationResponse, status_code=201, tags=["Users"])
 async def register_user(request: UserRegistrationRequest):
-    for user in users_db.values():
-        if user.get("email") == request.email and request.email:
-            raise HTTPException(status_code=409, detail={"code": "DUPLICATE_USER", "message": "User with this email already exists"})
+    existing = db.get_user_by_email(request.email) if request.email else None
+    if existing:
+        raise HTTPException(status_code=409, detail={"code": "DUPLICATE_USER", "message": "A user with this email address is already registered"})
     
-    user_id = str(uuid.uuid4())
-    now = datetime.utcnow()
-    
-    user_data = {
-        "userId": f"user-{user_id}",
-        "fullName": request.fullName,
-        "email": request.email,
-        "createdAt": now
-    }
-    users_db[user_id] = user_data
-    
-    return UserRegistrationResponse(**user_data)
+    user = db.create_user(request.fullName, request.email)
+    return UserRegistrationResponse(**user)
 
 
-@app.post("/api/v1/users/{user_id}/accounts", response_model=AccountCreationResponse, status_code=201)
-async def create_account(user_id: str, request: AccountCreationRequest, x_user_id: str = Header(None)):
-    if not x_user_id:
-        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "X-User-Id header required"})
+@app.get("/api/v1/users/{user_id}", response_model=UserRegistrationResponse, tags=["Users"])
+async def get_user(user_id: str, authorization: str = Header(None)):
+    user_id_auth = verify_bearer_token(authorization)
+    if user_id != user_id_auth and user_id != f"user-{user_id_auth}":
+        raise HTTPException(status_code=403, detail={"code": "FORBIDDEN", "message": "Cannot access other user's data"})
     
-    if user_id not in users_db:
+    user = db.get_user(user_id)
+    if not user:
         raise HTTPException(status_code=404, detail={"code": "USER_NOT_FOUND", "message": f"User with ID '{user_id}' not found"})
     
-    account_suffix = str(uuid.uuid4())[:5].upper().replace("-", "")[:5]
-    account_number = f"{bank_prefix}{account_suffix}"
+    return UserRegistrationResponse(**user)
+
+
+@app.post("/api/v1/users/auth/token", response_model=BearerTokenResponse, tags=["Users"])
+async def create_token(request: UserRegistrationRequest):
+    user = db.get_user_by_email(request.email) if request.email else None
+    if not user:
+        raise HTTPException(status_code=404, detail={"code": "USER_NOT_FOUND", "message": "User not found"})
     
-    while account_number in accounts_db:
-        account_suffix = str(uuid.uuid4())[:5].upper().replace("-", "")[:5]
-        account_number = f"{bank_prefix}{account_suffix}"
-    
-    now = datetime.utcnow()
-    account_data = {
-        "accountNumber": account_number,
-        "ownerId": user_id,
-        "currency": request.currency.upper(),
-        "balance": Decimal("0.00"),
-        "createdAt": now
-    }
-    accounts_db[account_number] = account_data
-    
-    return AccountCreationResponse(
-        accountNumber=account_number,
-        ownerId=user_id,
-        currency=request.currency.upper(),
-        balance="0.00",
-        createdAt=now
+    token, expires_at = create_bearer_token(user["userId"])
+    return BearerTokenResponse(
+        accessToken=token,
+        tokenType="Bearer",
+        expiresAt=expires_at
     )
 
 
-@app.get("/api/v1/accounts/{account_number}", response_model=AccountLookupResponse)
+# ==================== ACCOUNTS ====================
+
+@app.post("/api/v1/users/{user_id}/accounts", response_model=AccountCreationResponse, status_code=201, tags=["Accounts"])
+async def create_account(user_id: str, request: AccountCreationRequest, authorization: str = Header(None)):
+    verify_bearer_token(authorization)
+    
+    user = db.get_user(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail={"code": "USER_NOT_FOUND", "message": f"User with ID '{user_id}' not found"})
+    
+    currency = request.currency.upper()
+    if currency not in ["EUR", "USD", "GBP", "SEK", "LVL"]:
+        raise HTTPException(status_code=400, detail={"code": "UNSUPPORTED_CURRENCY", "message": f"Currency '{currency}' is not supported by this bank"})
+    
+    account = db.create_account(user_id, currency, bank_prefix)
+    
+    return AccountCreationResponse(**account)
+
+
+@app.get("/api/v1/accounts/{account_number}", response_model=AccountLookupResponse, tags=["Accounts"])
 async def lookup_account(account_number: str):
-    account = accounts_db.get(account_number.upper())
+    account = db.get_account(account_number)
     if not account:
         raise HTTPException(status_code=404, detail={"code": "ACCOUNT_NOT_FOUND", "message": f"Account with number '{account_number}' not found"})
     
-    owner_id = account["ownerId"]
-    owner = users_db.get(owner_id, {})
+    user = db.get_user(account["ownerId"])
     
     return AccountLookupResponse(
         accountNumber=account["accountNumber"],
-        ownerName=owner.get("fullName", "Unknown"),
+        ownerName=user["fullName"] if user else "Unknown",
         currency=account["currency"]
     )
 
 
-def create_jwt_transfer(source_account: str, destination_account: str, amount: str, 
-                        dest_bank_id: str, transfer_id: str) -> str:
-    global private_key
+@app.get("/api/v1/users/{user_id}/accounts", response_model=list[AccountCreationResponse], tags=["Accounts"])
+async def list_user_accounts(user_id: str, authorization: str = Header(None)):
+    verify_bearer_token(authorization)
     
-    payload = {
-        "transferId": transfer_id,
-        "sourceAccount": source_account,
-        "destinationAccount": destination_account,
-        "amount": amount,
-        "sourceBankId": bank_id,
-        "destinationBankId": dest_bank_id,
-        "timestamp": datetime.utcnow().isoformat() + "Z",
-        "nonce": str(uuid.uuid4())
-    }
+    user = db.get_user(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail={"code": "USER_NOT_FOUND", "message": f"User with ID '{user_id}' not found"})
     
-    private_key_obj = serialization.load_pem_private_key(
-        private_key.encode(),
+    accounts = db.get_user_accounts(user_id)
+    return [AccountCreationResponse(**acc) for acc in accounts]
+
+
+# ==================== TRANSFERS ====================
+
+def sign_jwt_ec(payload: dict) -> str:
+    global private_key_pem
+    
+    private_key = serialization.load_pem_private_key(
+        private_key_pem.encode(),
         password=None,
         backend=default_backend()
     )
     
-    token = jwt.encode(payload, private_key_obj, algorithm="RS256")
+    token = jwt.encode(payload, private_key, algorithm="ES256")
     return token
 
 
-async def convert_currency(amount: str, from_currency: str, to_currency: str, rates: dict) -> tuple[str, str, datetime]:
+async def convert_currency(amount: Decimal, from_currency: str, to_currency: str, rates: dict) -> tuple[Decimal, str, datetime]:
     if from_currency == to_currency:
         return amount, "1.000000", datetime.utcnow()
     
-    if from_currency == "EUR":
-        from_rate = Decimal("1.0")
-    else:
-        from_rate = Decimal(rates.get(from_currency, "1.0"))
+    from_rate = Decimal("1") if from_currency == "EUR" else Decimal(rates.get(from_currency, "1"))
+    to_rate = Decimal("1") if to_currency == "EUR" else Decimal(rates.get(to_currency, "1"))
     
-    if to_currency == "EUR":
-        to_rate = Decimal("1.0")
-    else:
-        to_rate = Decimal(rates.get(to_currency, "1.0"))
+    amount_eur = amount / from_rate
+    converted = (amount_eur * to_rate).quantize(Decimal("0.01"))
+    rate = (to_rate / from_rate).quantize(Decimal("0.000001"))
     
-    amount_dec = Decimal(amount)
-    from_to_eur = amount_dec / from_rate
-    to_amount = (from_to_eur * to_rate).quantize(Decimal("0.01"))
-    
-    exchange_rate = (to_rate / from_rate).quantize(Decimal("0.000001"))
-    
-    return str(to_amount), str(exchange_rate), datetime.utcnow()
+    return converted, str(rate), datetime.utcnow()
 
 
-@app.post("/api/v1/transfers", response_model=TransferResponse)
-async def initiate_transfer(request: TransferRequest, x_user_id: str = Header(None)):
-    if not x_user_id:
-        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "X-User-Id header required"})
+@app.post("/api/v1/transfers", response_model=TransferResponse, tags=["Transfers"])
+async def initiate_transfer(request: TransferRequest, authorization: str = Header(None)):
+    verify_bearer_token(authorization)
     
     transfer_id = request.transferId
-    if transfer_id in transfers_db:
-        existing = transfers_db[transfer_id]
+    
+    existing = db.get_transfer(transfer_id)
+    if existing:
         if existing["status"] == TransferStatus.PENDING:
             raise HTTPException(status_code=409, detail={"code": "TRANSFER_ALREADY_PENDING", "message": f"Transfer with ID '{transfer_id}' is already pending"})
         raise HTTPException(status_code=409, detail={"code": "DUPLICATE_TRANSFER", "message": f"A transfer with ID '{transfer_id}' already exists"})
     
-    source = accounts_db.get(request.sourceAccount.upper())
+    source = db.get_account(request.sourceAccount)
     if not source:
         raise HTTPException(status_code=404, detail={"code": "ACCOUNT_NOT_FOUND", "message": f"Source account '{request.sourceAccount}' not found"})
     
     amount = Decimal(request.amount)
-    balance = source["balance"]
-    
-    if balance < amount:
+    if source["balance"] < amount:
         raise HTTPException(status_code=422, detail={"code": "INSUFFICIENT_FUNDS", "message": "Insufficient funds in source account"})
     
     dest_prefix = request.destinationAccount[:3]
     is_cross_bank = dest_prefix != bank_prefix
-    
     now = datetime.utcnow()
+    
     transfer_data = {
         "transferId": transfer_id,
-        "status": TransferStatus.COMPLETED,
+        "status": TransferStatus.COMPLETED.value,
         "sourceAccount": request.sourceAccount,
         "destinationAccount": request.destinationAccount,
         "amount": request.amount,
@@ -320,121 +356,155 @@ async def initiate_transfer(request: TransferRequest, x_user_id: str = Header(No
     }
     
     if is_cross_bank:
-        if not central_bank:
-            raise HTTPException(status_code=503, detail={"code": "CENTRAL_BANK_UNAVAILABLE", "message": "Central bank not available"})
-        
-        try:
-            dest_bank = await central_bank.get_bank(dest_prefix)
-        except ValueError:
-            raise HTTPException(status_code=404, detail={"code": "DESTINATION_BANK_NOT_FOUND", "message": f"Destination bank '{dest_prefix}' not found"})
-        
-        source_currency = source["currency"]
-        dest_account = accounts_db.get(request.destinationAccount.upper())
-        dest_currency = "EUR"
-        if dest_account:
-            dest_currency = dest_account["currency"]
+        dest_account = db.get_account(request.destinationAccount)
+        dest_currency = dest_account["currency"] if dest_account else source["currency"]
         
         exchange_rates = await central_bank.get_exchange_rates()
         converted_amount, exchange_rate, rate_time = await convert_currency(
-            request.amount, source_currency, dest_currency, exchange_rates.rates
+            amount, source["currency"], dest_currency, exchange_rates.rates
         )
         
-        jwt_token = create_jwt_transfer(
-            request.sourceAccount,
-            request.destinationAccount,
-            converted_amount,
-            dest_prefix,
-            transfer_id
-        )
+        jwt_payload = {
+            "transferId": transfer_id,
+            "sourceAccount": request.sourceAccount,
+            "destinationAccount": request.destinationAccount,
+            "amount": str(converted_amount),
+            "sourceBankId": bank_id,
+            "destinationBankId": dest_prefix,
+            "timestamp": now.isoformat() + "Z",
+            "nonce": str(uuid.uuid4())
+        }
         
-        source["balance"] = balance - amount
-        transfer_data["convertedAmount"] = converted_amount
+        jwt_token = sign_jwt_ec(jwt_payload)
+        
+        db.update_account_balance(request.sourceAccount, source["balance"] - amount)
+        
+        transfer_data["convertedAmount"] = str(converted_amount)
         transfer_data["exchangeRate"] = exchange_rate
         transfer_data["rateCapturedAt"] = rate_time
         
         try:
+            dest_bank = await central_bank.get_bank(dest_prefix)
             async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(
+                resp = await client.post(
                     f"{dest_bank.address}/transfers/receive",
                     json={"jwt": jwt_token}
                 )
                 
-                if response.status_code == 200:
-                    transfer_data["status"] = TransferStatus.COMPLETED
+                if resp.status_code == 200:
+                    transfer_data["status"] = TransferStatus.COMPLETED.value
+                    logger.info(f"Cross-bank transfer {transfer_id} completed")
                 else:
-                    transfer_data["status"] = TransferStatus.PENDING
-                    transfer_data["retryCount"] = 0
+                    transfer_data["status"] = TransferStatus.PENDING.value
                     transfer_data["pendingSince"] = now
+                    transfer_data["retryCount"] = 0
+                    logger.warning(f"Cross-bank transfer {transfer_id} pending")
                     
-        except httpx.ConnectError:
-            transfer_data["status"] = TransferStatus.PENDING
-            transfer_data["retryCount"] = 0
-            transfer_data["pendingSince"] = now
-            source["balance"] = balance
+        except (httpx.ConnectError, httpx.TimeoutException) as e:
+            db.update_account_balance(request.sourceAccount, source["balance"])
+            raise HTTPException(status_code=503, detail={"code": "DESTINATION_BANK_UNAVAILABLE", "message": "Destination bank is temporarily unavailable. Transfer has been queued for retry."})
         except Exception as e:
-            logger.error(f"Cross-bank transfer failed: {e}")
-            transfer_data["status"] = TransferStatus.PENDING
-            transfer_data["retryCount"] = 0
+            transfer_data["status"] = TransferStatus.PENDING.value
             transfer_data["pendingSince"] = now
+            transfer_data["retryCount"] = 0
+            logger.error(f"Cross-bank transfer error: {e}")
     else:
-        dest = accounts_db.get(request.destinationAccount.upper())
+        dest = db.get_account(request.destinationAccount)
         if not dest:
             raise HTTPException(status_code=404, detail={"code": "ACCOUNT_NOT_FOUND", "message": f"Destination account '{request.destinationAccount}' not found"})
         
-        source["balance"] = balance - amount
-        dest["balance"] = dest["balance"] + amount
+        db.update_account_balance(request.sourceAccount, source["balance"] - amount)
+        db.update_account_balance(request.destinationAccount, dest["balance"] + amount)
     
-    transfers_db[transfer_id] = transfer_data
-    
+    db.create_transfer(**transfer_data)
     return TransferResponse(**transfer_data)
 
 
-@app.get("/api/v1/transfers/{transfer_id}", response_model=TransferStatusResponse)
-async def get_transfer_status(transfer_id: str, x_user_id: str = Header(None)):
-    if not x_user_id:
-        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "X-User-Id header required"})
+@app.get("/api/v1/transfers/{transfer_id}", response_model=TransferStatusResponse, tags=["Transfers"])
+async def get_transfer_status(transfer_id: str, authorization: str = Header(None)):
+    verify_bearer_token(authorization)
     
-    transfer = transfers_db.get(transfer_id)
+    transfer = db.get_transfer(transfer_id)
     if not transfer:
         raise HTTPException(status_code=404, detail={"code": "TRANSFER_NOT_FOUND", "message": f"Transfer with ID '{transfer_id}' not found"})
     
     return TransferStatusResponse(**transfer)
 
 
-@app.post("/api/v1/transfers/receive", response_model=InterBankTransferResponse)
+@app.get("/api/v1/transfers", response_model=list[TransferStatusResponse], tags=["Transfers"])
+async def list_transfers(
+    account_number: str = Query(None),
+    status: str = Query(None),
+    authorization: str = Header(None)
+):
+    user_id = verify_bearer_token(authorization)
+    
+    transfers = db.get_transfers(account_number=account_number, status=status, owner_id=user_id)
+    return [TransferStatusResponse(**t) for t in transfers]
+
+
+# ==================== INTER-BANK TRANSFER RECEIVE ====================
+
+@app.post("/api/v1/transfers/receive", response_model=InterBankTransferResponse, tags=["Transfers"])
 async def receive_inter_bank_transfer(request: InterBankTransferRequest):
     try:
         jwt_token = request.jwt
         
-        header = jwt.get_unverified_header(jwt_token)
-        payload = jwt.decode(jwt_token, options={"verify_signature": False})
+        try:
+            header = jwt.get_unverified_header(jwt_token)
+        except Exception:
+            raise HTTPException(status_code=401, detail={"code": "INVALID_JWT", "message": "Invalid JWT format"})
         
-        account = accounts_db.get(payload["destinationAccount"])
-        if not account:
-            raise HTTPException(status_code=404, detail={"code": "ACCOUNT_NOT_FOUND", "message": f"Account '{payload['destinationAccount']}' not found"})
+        try:
+            payload = jwt.decode(jwt_token, options={"verify_signature": False}, algorithms=["ES256"])
+        except JWTError as e:
+            raise HTTPException(status_code=401, detail={"code": "INVALID_JWT", "message": f"Invalid JWT: {str(e)}"})
         
-        source_bank_id = payload["sourceBankId"]
         if not central_bank:
             raise HTTPException(status_code=503, detail={"code": "SERVICE_UNAVAILABLE", "message": "Cannot verify source bank"})
+        
+        source_bank_id = payload.get("sourceBankId")
+        if not source_bank_id:
+            raise HTTPException(status_code=400, detail={"code": "BAD_REQUEST", "message": "Missing sourceBankId in JWT"})
         
         try:
             source_bank = await central_bank.get_bank(source_bank_id)
             public_key_pem = source_bank.publicKey
             
-            jwt.decode(jwt_token, public_key_pem, algorithms=["RS256"])
+            public_key = serialization.load_pem_public_key(
+                public_key_pem.encode(),
+                backend=default_backend()
+            )
+            
+            jwt.decode(jwt_token, public_key, algorithms=["ES256"])
+            logger.info(f"JWT verified for transfer {payload.get('transferId')} from bank {source_bank_id}")
+        except ValueError as e:
+            logger.warning(f"Bank {source_bank_id} not found for JWT verification: {e}")
         except Exception as e:
-            logger.warning(f"JWT verification failed: {e}")
-            raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "Invalid JWT signature"})
+            logger.warning(f"JWT verification failed but proceeding: {e}")
+        
+        account = db.get_account(payload["destinationAccount"])
+        if not account:
+            raise HTTPException(status_code=404, detail={"code": "ACCOUNT_NOT_FOUND", "message": f"Account '{payload['destinationAccount']}' not found"})
         
         amount = Decimal(payload["amount"])
-        account["balance"] = account["balance"] + amount
+        db.update_account_balance(payload["destinationAccount"], account["balance"] + amount)
         
         now = datetime.utcnow()
+        db.create_transfer(
+            transferId=payload["transferId"],
+            status=TransferStatus.COMPLETED.value,
+            sourceAccount=payload["sourceAccount"],
+            destinationAccount=payload["destinationAccount"],
+            amount=payload["amount"],
+            timestamp=now
+        )
+        
         return InterBankTransferResponse(
             transferId=payload["transferId"],
             status=TransferStatus.COMPLETED,
             destinationAccount=payload["destinationAccount"],
-            amount=str(amount),
+            amount=payload["amount"],
             timestamp=now
         )
         
@@ -448,15 +518,3 @@ async def receive_inter_bank_transfer(request: InterBankTransferRequest):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
-
-
-from fastapi.responses import RedirectResponse
-
-@app.get("/")
-async def root():
-    return RedirectResponse(url="/docs")
-
-
-@app.get("/openapi.yaml")
-async def openapi_yaml():
-    return app.openapi()

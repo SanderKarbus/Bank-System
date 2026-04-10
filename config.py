@@ -1,4 +1,5 @@
 import os
+import secrets
 
 
 class Settings:
@@ -12,6 +13,8 @@ class Settings:
     HEARTBEAT_INTERVAL_MINUTES: int = int(os.getenv("HEARTBEAT_INTERVAL_MINUTES", "25"))
     
     DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./bank.db")
+    
+    JWT_SECRET: str = os.getenv("JWT_SECRET", secrets.token_hex(32))
 
 
 settings = Settings()
