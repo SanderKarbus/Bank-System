@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Header, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -31,16 +32,18 @@ db = None
 bank_prefix = "XXX"
 bank_id = None
 
+bearer_scheme = HTTPBearer(auto_error=False)
+
 _bank_cache = {"data": None, "last_synced": None}
 
 
-def verify_user(authorization: str = Header(None)) -> dict:
-    if not authorization:
-        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "Bearer token required"})
+def verify_user(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)) -> dict:
+    if not credentials:
+        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "Bearer token required"}, headers={"WWW-Authenticate": "Bearer"})
     
-    payload = verify_bearer_token(authorization)
+    payload = verify_bearer_token(credentials.credentials)
     if not payload:
-        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "Invalid or expired token"})
+        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "Invalid or expired token"}, headers={"WWW-Authenticate": "Bearer"})
     
     return payload
 
@@ -215,6 +218,8 @@ app = FastAPI(
     openapi_url="/openapi.json"
 )
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+
+app.security = HTTPBearer(auto_error=False)
 
 
 @app.get("/")
