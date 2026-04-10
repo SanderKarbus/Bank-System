@@ -257,7 +257,7 @@ async def register_user(req: UserRegistrationRequest):
     
     user = db.create_user(req.fullName, req.email)
     
-    token_data = create_user_token(user["id"], user["fullName"])
+    token_data = create_user_token(user["userId"], user["fullName"])
     user["token"] = token_data
     
     return user
