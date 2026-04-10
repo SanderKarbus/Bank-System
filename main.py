@@ -41,13 +41,10 @@ bank_id: Optional[str] = None
 private_key = None
 
 
-def get_current_user_id(authorization: str = Header(None)) -> str:
-    if not authorization:
-        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "Authentication required"})
-    if not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "Invalid authorization header"})
-    token = authorization[7:]
-    if token not in users_db:
+def get_current_user_id(x_user_id: str = Header(None)) -> str:
+    if not x_user_id:
+        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "User ID required (X-User-Id header)"})
+    if x_user_id not in users_db:
         raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "Invalid token"})
     return token
 
@@ -190,15 +187,11 @@ async def register_user(request: UserRegistrationRequest):
 
 
 @app.post("/api/v1/users/{user_id}/accounts", response_model=AccountCreationResponse, status_code=201)
-async def create_account(user_id: str, request: AccountCreationRequest, authorization: str = Header(None)):
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "Authentication required"})
+async def create_account(user_id: str, request: AccountCreationRequest, x_user_id: str = Header(None)):
+    if not x_user_id:
+        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "X-User-Id header required"})
     
-    token = authorization[7:]
-    if token != user_id and f"user-{token}" != user_id:
-        raise HTTPException(status_code=404, detail={"code": "USER_NOT_FOUND", "message": f"User with ID '{user_id}' not found"})
-    
-    if user_id not in users_db and f"user-{user_id}" not in users_db:
+    if user_id not in users_db:
         raise HTTPException(status_code=404, detail={"code": "USER_NOT_FOUND", "message": f"User with ID '{user_id}' not found"})
     
     account_suffix = str(uuid.uuid4())[:5].upper().replace("-", "")[:5]
@@ -292,9 +285,9 @@ async def convert_currency(amount: str, from_currency: str, to_currency: str, ra
 
 
 @app.post("/api/v1/transfers", response_model=TransferResponse)
-async def initiate_transfer(request: TransferRequest, authorization: str = Header(None)):
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "Authentication required"})
+async def initiate_transfer(request: TransferRequest, x_user_id: str = Header(None)):
+    if not x_user_id:
+        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "X-User-Id header required"})
     
     transfer_id = request.transferId
     if transfer_id in transfers_db:
@@ -397,9 +390,9 @@ async def initiate_transfer(request: TransferRequest, authorization: str = Heade
 
 
 @app.get("/api/v1/transfers/{transfer_id}", response_model=TransferStatusResponse)
-async def get_transfer_status(transfer_id: str, authorization: str = Header(None)):
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "Authentication required"})
+async def get_transfer_status(transfer_id: str, x_user_id: str = Header(None)):
+    if not x_user_id:
+        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "X-User-Id header required"})
     
     transfer = transfers_db.get(transfer_id)
     if not transfer:
