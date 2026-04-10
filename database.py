@@ -376,14 +376,18 @@ class Database:
                 )
     
     def save_transfer(self, transfer_data: dict):
-        with self._cursor() as cursor:
-            if USE_POSTGRES:
+        if USE_POSTGRES:
+            if self._pg_conn is None:
+                self._pg_conn = psycopg2.connect(self._db_url)
+                self._pg_conn.autocommit = True
+            cursor = self._pg_conn.cursor()
+            try:
                 cursor.execute("""
                     INSERT INTO transfers 
                     ("transferId", status, "sourceAccount", "destinationAccount", amount, timestamp,
-                     "convertedAmount", "exchangeRate", "rateCapturedAt", "pendingSince", "nextRetryAt", "retryCount", "errorMessage")
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT ("transferId") DO UPDATE SET status = %s
+                     "convertedAmount", "exchangeRate", "rateCapturedAt", "pendingSince", "nextRetryAt", "retryCount", "lastRetryAt", "errorMessage")
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT ("transferId") DO UPDATE SET status = EXCLUDED.status
                 """, (
                     transfer_data.get("transferId"),
                     transfer_data.get("status"),
@@ -397,10 +401,21 @@ class Database:
                     transfer_data.get("pendingSince"),
                     transfer_data.get("nextRetryAt"),
                     transfer_data.get("retryCount", 0),
-                    transfer_data.get("errorMessage"),
-                    transfer_data.get("status")
+                    transfer_data.get("lastRetryAt"),
+                    transfer_data.get("errorMessage")
                 ))
-            else:
+            except Exception as e:
+                print(f"Transfer save error: {e}")
+                try:
+                    cursor.execute("""
+                        UPDATE transfers SET status = %s WHERE "transferId" = %s
+                    """, (transfer_data.get("status"), transfer_data.get("transferId")))
+                except:
+                    pass
+            finally:
+                cursor.close()
+        else:
+            with self._cursor() as cursor:
                 cursor.execute("""
                     INSERT OR REPLACE INTO transfers 
                     (transferId, status, sourceAccount, destinationAccount, amount, timestamp,
