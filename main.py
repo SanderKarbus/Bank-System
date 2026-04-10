@@ -200,6 +200,17 @@ async def health():
     )
 
 
+@app.get("/debug", tags=["Debug"])
+async def debug_settings():
+    return {
+        "BANK_NAME": settings.BANK_NAME,
+        "BANK_ADDRESS": settings.BANK_ADDRESS,
+        "BANK_ID": settings.BANK_ID,
+        "bank_id_var": bank_id,
+        "bank_prefix_var": bank_prefix,
+    }
+
+
 # ==================== CENTRAL BANK PROXIES ====================
 
 @app.get("/api/v1/central-bank/banks", response_model=BankDirectory, tags=["Central Bank"])
