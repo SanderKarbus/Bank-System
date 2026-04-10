@@ -221,8 +221,6 @@ app = FastAPI(
 )
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
-app.security = HTTPBearer(auto_error=False)
-
 
 @app.get("/")
 async def root():
