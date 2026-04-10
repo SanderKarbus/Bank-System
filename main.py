@@ -13,12 +13,12 @@ from fastapi import FastAPI, HTTPException, Header, Depends, Body, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from jose import jwt, JWTError, jwt
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography import x509
+from jose import jwt, JWTError
 import httpx
 
 from config import settings
@@ -48,6 +48,14 @@ private_key_pem: Optional[str] = None
 public_key_pem: Optional[str] = None
 
 
+def verify_user(x_user_id: str = Header(None)) -> str:
+    if not x_user_id:
+        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "X-User-Id header required"})
+    if x_user_id not in db.get_all_user_ids():
+        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "User not found"})
+    return x_user_id
+
+
 def create_bearer_token(user_id: str, expires_in: int = 3600) -> tuple[str, datetime]:
     exp = datetime.utcnow() + timedelta(seconds=expires_in)
     payload = {
@@ -55,24 +63,6 @@ def create_bearer_token(user_id: str, expires_in: int = 3600) -> tuple[str, date
         "exp": exp,
         "iat": datetime.utcnow()
     }
-    token = jwt.encode(payload, settings.JWT_SECRET, algorithm="HS256")
-    return token, exp
-
-
-def verify_bearer_token(authorization: str = Header(None)) -> str:
-    if not authorization:
-        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "Authentication required"})
-    if not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "Invalid authorization header"})
-    token = authorization[7:]
-    try:
-        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=["HS256"])
-        user_id = payload.get("sub")
-        if not user_id:
-            raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "Invalid token"})
-        return user_id
-    except JWTError:
-        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "Invalid or expired token"})
 
 
 async def heartbeat_task():
@@ -221,10 +211,8 @@ async def register_user(request: UserRegistrationRequest):
 
 
 @app.get("/api/v1/users/{user_id}", response_model=UserRegistrationResponse, tags=["Users"])
-async def get_user(user_id: str, authorization: str = Header(None)):
-    user_id_auth = verify_bearer_token(authorization)
-    if user_id != user_id_auth and user_id != f"user-{user_id_auth}":
-        raise HTTPException(status_code=403, detail={"code": "FORBIDDEN", "message": "Cannot access other user's data"})
+async def get_user(user_id: str, x_user_id: str = Header(None)):
+    verify_user(x_user_id)
     
     user = db.get_user(user_id)
     if not user:
@@ -239,19 +227,18 @@ async def create_token(request: UserRegistrationRequest):
     if not user:
         raise HTTPException(status_code=404, detail={"code": "USER_NOT_FOUND", "message": "User not found"})
     
-    token, expires_at = create_bearer_token(user["userId"])
     return BearerTokenResponse(
-        accessToken=token,
+        accessToken=user["id"],
         tokenType="Bearer",
-        expiresAt=expires_at
+        expiresAt=datetime.utcnow()
     )
 
 
 # ==================== ACCOUNTS ====================
 
 @app.post("/api/v1/users/{user_id}/accounts", response_model=AccountCreationResponse, status_code=201, tags=["Accounts"])
-async def create_account(user_id: str, request: AccountCreationRequest, authorization: str = Header(None)):
-    verify_bearer_token(authorization)
+async def create_account(user_id: str, request: AccountCreationRequest, x_user_id: str = Header(None)):
+    verify_user(x_user_id)
     
     user = db.get_user(user_id)
     if not user:
@@ -282,8 +269,8 @@ async def lookup_account(account_number: str):
 
 
 @app.get("/api/v1/users/{user_id}/accounts", response_model=list[AccountCreationResponse], tags=["Accounts"])
-async def list_user_accounts(user_id: str, authorization: str = Header(None)):
-    verify_bearer_token(authorization)
+async def list_user_accounts(user_id: str, x_user_id: str = Header(None)):
+    verify_user(x_user_id)
     
     user = db.get_user(user_id)
     if not user:
@@ -323,8 +310,8 @@ async def convert_currency(amount: Decimal, from_currency: str, to_currency: str
 
 
 @app.post("/api/v1/transfers", response_model=TransferResponse, tags=["Transfers"])
-async def initiate_transfer(request: TransferRequest, authorization: str = Header(None)):
-    verify_bearer_token(authorization)
+async def initiate_transfer(request: TransferRequest, x_user_id: str = Header(None)):
+    verify_user(x_user_id)
     
     transfer_id = request.transferId
     
@@ -421,8 +408,8 @@ async def initiate_transfer(request: TransferRequest, authorization: str = Heade
 
 
 @app.get("/api/v1/transfers/{transfer_id}", response_model=TransferStatusResponse, tags=["Transfers"])
-async def get_transfer_status(transfer_id: str, authorization: str = Header(None)):
-    verify_bearer_token(authorization)
+async def get_transfer_status(transfer_id: str, x_user_id: str = Header(None)):
+    verify_user(x_user_id)
     
     transfer = db.get_transfer(transfer_id)
     if not transfer:
@@ -435,11 +422,11 @@ async def get_transfer_status(transfer_id: str, authorization: str = Header(None
 async def list_transfers(
     account_number: str = Query(None),
     status: str = Query(None),
-    authorization: str = Header(None)
+    x_user_id: str = Header(None)
 ):
-    user_id = verify_bearer_token(authorization)
+    verify_user(x_user_id)
     
-    transfers = db.get_transfers(account_number=account_number, status=status, owner_id=user_id)
+    transfers = db.get_transfers(account_number=account_number, status=status, owner_id=x_user_id)
     return [TransferStatusResponse(**t) for t in transfers]
 
 

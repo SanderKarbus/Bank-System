@@ -125,6 +125,12 @@ class Database:
             return dict(row)
         return None
     
+    def get_all_user_ids(self) -> list:
+        with self._cursor() as cursor:
+            cursor.execute("SELECT id FROM users")
+            rows = cursor.fetchall()
+        return [r["id"] for r in rows]
+    
     def get_user_by_email(self, email: str) -> Optional[dict]:
         with self._cursor() as cursor:
             cursor.execute("SELECT * FROM users WHERE email = ?", (email,))
