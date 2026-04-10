@@ -6,3 +6,4 @@ python-jose[cryptography]>=3.3.0
 cryptography>=42.0.0
 python-multipart>=0.0.6
 apscheduler>=3.10.4
+psycopg2-binary>=2.9.9
