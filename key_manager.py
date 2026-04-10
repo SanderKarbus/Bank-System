@@ -101,6 +101,13 @@ class KeyManager:
         except:
             _, public_pem = self.load_keys()
             return public_pem
+    
+    def _get_private_key(self) -> str:
+        ec_private_path = self.private_key_path.replace(".pem", "_ec.pem")
+        if os.path.exists(ec_private_path):
+            with open(ec_private_path, "r") as f:
+                return f.read()
+        return self.load_keys()[0]
 
 
 key_manager = KeyManager()
