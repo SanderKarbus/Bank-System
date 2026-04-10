@@ -2,13 +2,11 @@ from datetime import datetime, timedelta
 from typing import Optional
 import secrets
 import os
-from jose import jwt
+from jose import jwt, ExpiredSignatureError
 
 SECRET_KEY = os.getenv("JWT_SECRET", secrets.token_hex(32))
 ALGORITHM = "HS256"
 TOKEN_EXPIRE_HOURS = 24
-
-_tokens = {}
 
 
 def create_user_token(user_id: str, full_name: str) -> dict:
@@ -20,12 +18,6 @@ def create_user_token(user_id: str, full_name: str) -> dict:
         "type": "user_access"
     }
     token = jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
-    
-    _tokens[user_id] = {
-        "token": token,
-        "expires_at": exp,
-        "full_name": full_name
-    }
     
     return {
         "accessToken": token,
@@ -50,19 +42,8 @@ def verify_bearer_token(authorization: Optional[str]) -> Optional[dict]:
         if payload.get("type") != "user_access":
             return None
         
-        user_id = payload.get("sub")
-        if user_id and user_id in _tokens:
-            stored = _tokens[user_id]
-            if stored["expires_at"] > datetime.utcnow():
-                return {"user_id": user_id, "full_name": payload.get("name")}
-        
-        return payload
-    except jwt.ExpiredSignatureError:
+        return {"user_id": payload.get("sub"), "full_name": payload.get("name")}
+    except ExpiredSignatureError:
         return None
     except Exception:
         return None
-
-
-def invalidate_token(user_id: str):
-    if user_id in _tokens:
-        del _tokens[user_id]
