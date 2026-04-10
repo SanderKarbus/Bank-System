@@ -47,3 +47,7 @@ def verify_bearer_token(authorization: Optional[str]) -> Optional[dict]:
         return None
     except Exception:
         return None
+
+
+def invalidate_token(user_id: str):
+    pass
