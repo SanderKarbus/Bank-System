@@ -1,0 +1,14 @@
+{
+  "build": {
+    "builder": "NIXPACKS",
+    "nixpacks": {
+      "language": "python",
+      "pip": "requirements.txt"
+    }
+  },
+  "deploy": {
+    "startCommand": "python main.py",
+    "healthcheckPath": "/health",
+    "healthcheckInterval": 30
+  }
+}
