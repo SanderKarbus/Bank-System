@@ -218,17 +218,11 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
     docs_url="/docs",
-    openapi_url="/openapi.json",
-    swagger_ui_init_oauth={
-        "clientId": "swagger-ui",
-        "useBasicAuthentication": True,
-    }
+    openapi_url="/openapi.json"
 )
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 bearer_scheme = HTTPBearer(auto_error=False)
-
-app.security = bearer_scheme
 
 
 @app.get("/")
@@ -476,3 +470,20 @@ async def rates():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+@app.on_event("startup")
+def setup_security():
+    if app.openapi_schema:
+        app.openapi_schema["components"]["securitySchemes"] = {
+            "BearerAuth": {
+                "type": "http",
+                "scheme": "bearer",
+                "bearerFormat": "JWT",
+                "description": "JWT token obtained from user registration"
+            }
+        }
+        for path in app.openapi_schema["paths"]:
+            for method in app.openapi_schema["paths"][path]:
+                if method in ["get", "post", "put", "delete"]:
+                    app.openapi_schema["paths"][path][method]["security"] = [{"BearerAuth": []}]
