@@ -1,9 +1,10 @@
 from datetime import datetime, timedelta
 from typing import Optional
 import secrets
+import os
 from jose import jwt
 
-SECRET_KEY = secrets.token_hex(32)
+SECRET_KEY = os.getenv("JWT_SECRET", secrets.token_hex(32))
 ALGORITHM = "HS256"
 TOKEN_EXPIRE_HOURS = 24
 
@@ -58,7 +59,7 @@ def verify_bearer_token(authorization: Optional[str]) -> Optional[dict]:
         return payload
     except jwt.ExpiredSignatureError:
         return None
-    except jwt.InvalidTokenError:
+    except Exception:
         return None
 
 
