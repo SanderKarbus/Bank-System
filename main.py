@@ -316,6 +316,33 @@ async def list_accounts(user_id: str, auth: dict = Depends(verify_user)):
     return db.get_user_accounts(user_id)
 
 
+@app.post("/api/v1/accounts/{account_number}/deposit")
+async def deposit(account_number: str, amount: str, auth: dict = Depends(verify_user)):
+    account = db.get_account(account_number.upper())
+    if not account:
+        raise HTTPException(status_code=404, detail={"code": "ACCOUNT_NOT_FOUND", "message": "Account not found"})
+    
+    if auth["user_id"] != account["ownerId"]:
+        raise HTTPException(status_code=403, detail={"code": "FORBIDDEN", "message": "Cannot deposit to other user's account"})
+    
+    try:
+        deposit_amount = Decimal(amount)
+        if deposit_amount <= 0:
+            raise HTTPException(status_code=400, detail={"code": "INVALID_AMOUNT", "message": "Amount must be positive"})
+    except:
+        raise HTTPException(status_code=400, detail={"code": "INVALID_AMOUNT", "message": "Invalid amount format"})
+    
+    new_balance = Decimal(account["balance"]) + deposit_amount
+    db.update_balance(account_number.upper(), new_balance)
+    
+    return {
+        "accountNumber": account_number.upper(),
+        "newBalance": str(new_balance),
+        "deposited": amount,
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+
 def sign_ec(payload: dict) -> str:
     private_key = serialization.load_pem_private_key(key_manager._get_private_key().encode(), password=None, backend=default_backend())
     return jwt.encode(payload, private_key, algorithm="ES256")
