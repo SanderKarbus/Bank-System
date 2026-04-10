@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from typing import Optional
-import jwt
 import secrets
+from jose import jwt
 
 SECRET_KEY = secrets.token_hex(32)
 ALGORITHM = "HS256"
