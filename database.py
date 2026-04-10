@@ -279,6 +279,21 @@ class Database:
                 VALUES (1, ?, ?, ?)
             """, (bank_id, bank_prefix, bank_address))
     
+    def save_bank_id_to_db(self, bank_id: str):
+        with self._cursor() as cursor:
+            cursor.execute("""
+                INSERT OR REPLACE INTO bank_info (id, bankId, bankPrefix, bankAddress)
+                VALUES (1, ?, NULL, NULL)
+            """, (bank_id,))
+    
+    def get_bank_id_from_db(self) -> Optional[str]:
+        with self._cursor() as cursor:
+            cursor.execute("SELECT bankId FROM bank_info WHERE id = 1")
+            row = cursor.fetchone()
+        if row:
+            return row["bankId"]
+        return None
+    
     def get_bank_info(self) -> Optional[dict]:
         with self._cursor() as cursor:
             cursor.execute("SELECT * FROM bank_info WHERE id = 1")

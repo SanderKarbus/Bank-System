@@ -86,14 +86,33 @@ async def register_with_central_bank():
         
         bank_address = settings.BANK_ADDRESS
         
-        result = await central_bank.register_bank(
-            name=settings.BANK_NAME,
-            address=bank_address,
-            public_key=public_key_pem
-        )
-        
-        bank_id = result.bankId
-        bank_prefix = bank_id[:3]
+        stored_bank_id = db.get_bank_id_from_db()
+        if stored_bank_id:
+            try:
+                result = await central_bank.send_heartbeat(stored_bank_id)
+                bank_id = stored_bank_id
+                bank_prefix = bank_id[:3]
+                logger.info(f"Using existing bank registration: {bank_id}")
+            except:
+                result = await central_bank.register_bank(
+                    name=settings.BANK_NAME,
+                    address=bank_address,
+                    public_key=public_key_pem
+                )
+                bank_id = result.bankId
+                bank_prefix = bank_id[:3]
+                db.save_bank_id_to_db(bank_id)
+                logger.info(f"Registered new bank after heartbeat failed: {bank_id}")
+        else:
+            result = await central_bank.register_bank(
+                name=settings.BANK_NAME,
+                address=bank_address,
+                public_key=public_key_pem
+            )
+            bank_id = result.bankId
+            bank_prefix = bank_id[:3]
+            db.save_bank_id_to_db(bank_id)
+            logger.info(f"First time bank registration: {bank_id}")
         
         db.update_bank_info(bank_id, bank_prefix, bank_address)
         
