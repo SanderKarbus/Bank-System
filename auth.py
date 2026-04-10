@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 from typing import Optional
-from jose import jwt, ExpiredSignatureError
+from jose import jwt, ExpiredSignatureError, JWTError
 
 SECRET_KEY = "this-is-a-fixed-secret-key-for-testing-only-do-not-use-in-production"
 ALGORITHM = "HS256"
@@ -24,16 +24,7 @@ def create_user_token(user_id: str, full_name: str) -> dict:
     }
 
 
-def verify_bearer_token(authorization: Optional[str]) -> Optional[dict]:
-    if not authorization:
-        return None
-    
-    parts = authorization.split()
-    if len(parts) != 2 or parts[0].lower() != "bearer":
-        return None
-    
-    token = parts[1]
-    
+def verify_token(token: str) -> Optional[dict]:
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         
@@ -41,9 +32,8 @@ def verify_bearer_token(authorization: Optional[str]) -> Optional[dict]:
             return None
         
         return {"user_id": payload.get("sub"), "full_name": payload.get("name")}
-    except ExpiredSignatureError:
-        return None
-    except Exception:
+    except Exception as e:
+        print(f"Token verification failed: {e}")
         return None
 
 
