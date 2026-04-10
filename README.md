@@ -1,80 +1,134 @@
-# Pangasüsteem - Branch Bank Implementation
+# 🏦 Branch Bank API
 
-Distributed Banking System'i harupank, mis registreerub keskpangaga ja võimaldab ülekandeid.
+Distributed Banking System branch bank that communicates with the central bank.
 
-## Kiire alustamine
+## Technologies
 
-### 1. Paigalda sõltuvused
+- **Python 3.11** + **FastAPI**
+- **SQLite** database
+- **JWT (ES256)** authentication
+- **Railway** hosting
+
+## Live API
+
+- **URL:** https://bank-system-production-2902.up.railway.app
+- **Swagger UI:** https://bank-system-production-2902.up.railway.app/docs
+- **Health:** https://bank-system-production-2902.up.railway.app/health
+
+## API Endpoints
+
+### Users
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/v1/users` | Register user |
+| GET | `/api/v1/users/{id}` | Get user info |
+
+### Accounts
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/v1/users/{id}/accounts` | Create account |
+| GET | `/api/v1/accounts/{number}` | Lookup account |
+| GET | `/api/v1/users/{id}/accounts` | List user accounts |
+
+### Transfers
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/v1/transfers` | Initiate transfer |
+| GET | `/api/v1/transfers/{id}` | Get transfer status |
+| POST | `/api/v1/transfers/receive` | Receive cross-bank transfer |
+
+### Central Bank
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v1/central-bank/banks` | List all banks |
+| GET | `/api/v1/central-bank/exchange-rates` | Get exchange rates |
+
+## Authentication
+
+Protected endpoints require `X-User-Id` header with the user's ID.
+
+## Installation
+
 ```bash
+# Clone repo
+git clone https://github.com/SanderKarbus/Bank-System.git
+cd Bank-System
+
+# Install dependencies
 pip install -r requirements.txt
-```
 
-### 2. Keskkonnaseaded
-Kopeeri `.env.example` → `.env` ja muuda vajadusel:
-```bash
+# Configure environment
 cp .env.example .env
-```
+# Edit .env as needed
 
-### 3. Käivita server
-```bash
+# Run
 python main.py
 ```
 
-## NB! Avalik URL
+## Environment Variables
 
-Keskpank kontrollib sinu panka enne registreerimist - ta kutsub välja `GET {BANK_ADDRESS}/health`.
+| Variable | Description | Example |
+|----------|-------------|---------|
+| BANK_NAME | Bank name | "My Branch Bank" |
+| BANK_ADDRESS | Bank URL | "https://mybank.railway.app" |
+| BANK_ID | Central bank ID | "MYB001" |
+| CENTRAL_BANK_URL | Central bank URL | "https://test.diarainfra.com/central-bank/api/v1" |
 
-**Kohustuslik:** Sul peab olema **avalikult kättesaadav URL**.
+## Database Schema
 
-### Avaliku URL-i loomiseks
+```
+users:
+  - id (TEXT PRIMARY KEY)
+  - fullName (TEXT)
+  - email (TEXT UNIQUE)
+  - createdAt (TEXT)
 
-**Option 1: ngrok (kiire)**
+accounts:
+  - accountNumber (TEXT PRIMARY KEY)
+  - ownerId (TEXT)
+  - currency (TEXT)
+  - balance (REAL)
+  - createdAt (TEXT)
+
+transfers:
+  - transferId (TEXT PRIMARY KEY)
+  - status (TEXT)
+  - sourceAccount (TEXT)
+  - destinationAccount (TEXT)
+  - amount (TEXT)
+  - timestamp (TEXT)
+```
+
+## Examples
+
+### Register User
 ```bash
-ngrok http 8000
-# Kopeeri forward URL ja pane see .env faili BANK_ADDRESS
+curl -X POST "https://bank-system-production-2902.up.railway.app/api/v1/users" \
+  -H "Content-Type: application/json" \
+  -d '{"fullName": "John Doe", "email": "john@test.com"}'
 ```
 
-**Option 2: Cloudflare Tunnel (tasuta, püsiv)**
+### Create Account
 ```bash
-cloudflared tunnel --url http://localhost:8000
+curl -X POST "https://bank-system-production-2902.up.railway.app/api/v1/users/{userId}/accounts" \
+  -H "X-User-Id: {userId}" \
+  -H "Content-Type: application/json" \
+  -d '{"currency": "EUR"}'
 ```
 
-## API Endpoint'id
-
-### Keskpanga endpoint'id (vaata teised pangad)
-- `GET /central-bank/banks` - Kõik registreeritud pangad
-- `GET /central-bank/banks/{bankId}` - Konkreetse panga andmed
-- `GET /central-bank/exchange-rates` - Valuutakursid
-
-### Tervis
-- `GET /health` - Panga tervise kontroll (kriitiline keskpangale!)
-
-### Kasutajatoimingud
-- `POST /api/v1/users` - Kasutaja registreerimine
-- `POST /api/v1/users/{userId}/accounts` - Konto loomine
-- `GET /api/v1/accounts/{accountNumber}` - Konto otsing
-
-### Ülekanded
-- `POST /api/v1/transfers` - Ülekanne
-- `GET /api/v1/transfers/{transferId}` - Ülekande staatus
-- `POST /api/v1/transfers/receive` - Cross-bank vastuvõtt (tulevikus)
-
-## Heartbeat
-
-Pank saadab automaatselt heartbeat'i keskpanka iga 25 minuti järel, et jääda aktiivseks (30 min timeout keskpangal).
-
-## Struktuur
-
+### Make Transfer
+```bash
+curl -X POST "https://bank-system-production-2902.up.railway.app/api/v1/transfers" \
+  -H "X-User-Id: {userId}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "transferId": "uuid-here",
+    "sourceAccount": "MYB12345",
+    "destinationAccount": "MYB54321",
+    "amount": "100.00"
+  }'
 ```
-pangasüsteem/
-├── main.py                  # FastAPI server
-├── central_bank_client.py   # Keskpanga API klient
-├── models.py                # Pydantic mudelid
-├── config.py                # Seadistused
-├── key_manager.py           # RSA võtmete haldus
-├── requirements.txt
-├── .env.example
-└── keys/                    # Võtmed (genereeritakse automaatselt)
-    ├── private_key.pem
-    └── public_key.pem
-```
+
+## GitHub
+
+https://github.com/SanderKarbus/Bank-System

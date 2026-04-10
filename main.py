@@ -52,43 +52,54 @@ async def heartbeat_task():
 async def lifespan(app: FastAPI):
     global scheduler, db, bank_id, bank_prefix, central_bank
     
-    db = Database()
-    db.init_db()
-    scheduler = AsyncIOScheduler()
+    import os
+    logger.info(f"DEBUG ENV BANK_ID={os.environ.get('BANK_ID', 'NOT_SET')}")
     
-    private_key, public_key = key_manager.generate_ec_keys()
-    central_bank = CentralBankClient(settings.CENTRAL_BANK_URL)
-    
-    bank_id = settings.BANK_ID or ""
-    if bank_id:
-        bank_prefix = bank_id[:3]
-        try:
-            await central_bank.send_heartbeat(bank_id)
-            logger.info(f"Heartbeat OK: {bank_id}")
-        except Exception as e:
-            logger.warning(f"Heartbeat failed for {bank_id}, re-registering: {e}")
+    try:
+        db = Database()
+        db.init_db()
+        scheduler = AsyncIOScheduler()
+        
+        private_key, public_key = key_manager.generate_ec_keys()
+        central_bank = CentralBankClient(settings.CENTRAL_BANK_URL)
+        
+        bank_id = settings.BANK_ID or ""
+        logger.info(f"DEBUG settings.BANK_ID={repr(settings.BANK_ID)}, bank_id={repr(bank_id)}")
+        
+        if bank_id:
+            bank_prefix = bank_id[:3]
+            try:
+                await central_bank.send_heartbeat(bank_id)
+                logger.info(f"Heartbeat OK: {bank_id}")
+            except Exception as e:
+                logger.warning(f"Heartbeat failed for {bank_id}, re-registering: {e}")
+                try:
+                    result = await central_bank.register_bank(settings.BANK_NAME, settings.BANK_ADDRESS, public_key)
+                    bank_id = result.bankId
+                    bank_prefix = bank_id[:3]
+                    logger.info(f"Re-registered as: {bank_id}")
+                except Exception as e2:
+                    logger.error(f"Re-registration failed: {e2}")
+                    bank_id = ""
+                    bank_prefix = "XXX"
+        else:
+            logger.info("No BANK_ID, registering new bank...")
             try:
                 result = await central_bank.register_bank(settings.BANK_NAME, settings.BANK_ADDRESS, public_key)
                 bank_id = result.bankId
                 bank_prefix = bank_id[:3]
-                logger.info(f"Re-registered as: {bank_id}")
-            except Exception as e2:
-                logger.error(f"Re-registration failed: {e2}")
-                bank_id = ""
+                logger.info(f"Registered new bank: {bank_id}")
+            except Exception as e:
+                logger.error(f"Registration failed: {e}")
                 bank_prefix = "XXX"
-    else:
-        try:
-            result = await central_bank.register_bank(settings.BANK_NAME, settings.BANK_ADDRESS, public_key)
-            bank_id = result.bankId
-            bank_prefix = bank_id[:3]
-            logger.info(f"Registered new bank: {bank_id}")
-        except Exception as e:
-            logger.error(f"Registration failed: {e}")
-            bank_prefix = "XXX"
-    
-    scheduler.add_job(heartbeat_task, 'interval', minutes=settings.HEARTBEAT_INTERVAL_MINUTES, id='heartbeat')
-    scheduler.start()
-    logger.info(f"Server started, bank_id={bank_id}, prefix={bank_prefix}")
+        
+        scheduler.add_job(heartbeat_task, 'interval', minutes=settings.HEARTBEAT_INTERVAL_MINUTES, id='heartbeat')
+        scheduler.start()
+        logger.info(f"Server started, bank_id={bank_id}, prefix={bank_prefix}")
+        
+    except Exception as e:
+        logger.error(f"LIFESPAN ERROR: {e}")
+        bank_prefix = "XXX"
     
     yield
     
@@ -114,7 +125,12 @@ async def health():
 
 @app.get("/debug")
 async def debug():
-    return {"BANK_ID_env": settings.BANK_ID, "bank_id": bank_id, "bank_prefix": bank_prefix}
+    return {
+        "BANK_ID_env": str(settings.BANK_ID) if settings.BANK_ID else "NONE",
+        "bank_id": str(bank_id) if bank_id else "NONE",
+        "bank_prefix": str(bank_prefix),
+        "bank_address": settings.BANK_ADDRESS
+    }
 
 
 # ==================== USERS ====================
