@@ -1,10 +1,8 @@
 from datetime import datetime, timedelta
 from typing import Optional
-import secrets
-import os
 from jose import jwt, ExpiredSignatureError
 
-SECRET_KEY = os.getenv("JWT_SECRET", secrets.token_hex(32))
+SECRET_KEY = "this-is-a-fixed-secret-key-for-testing-only-do-not-use-in-production"
 ALGORITHM = "HS256"
 TOKEN_EXPIRE_HOURS = 8760
 
