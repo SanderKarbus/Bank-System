@@ -29,11 +29,11 @@ class Database:
     
     def _get_connection(self):
         if USE_POSTGRES:
-            if self._pg_conn is None:
+            if self._pg_conn is None or self._pg_conn.closed:
                 import psycopg2
                 self._pg_conn = psycopg2.connect(self._db_url)
-                self._pg_conn.autocommit = True
-            return self._pg_conn.cursor()
+                self._pg_conn.autocommit = False
+            return self._pg_conn
         else:
             if self._connection is None:
                 self._connection = sqlite3.connect(self.db_path, check_same_thread=False)
@@ -42,17 +42,26 @@ class Database:
     
     @contextmanager
     def _cursor(self):
-        cursor = self._get_connection()
-        try:
-            yield cursor
-            if not USE_POSTGRES:
-                self._connection.commit()
-        except Exception:
-            if not USE_POSTGRES:
-                self._connection.rollback()
-            raise
-        finally:
-            if not USE_POSTGRES:
+        conn = self._get_connection()
+        if USE_POSTGRES:
+            cursor = conn.cursor()
+            try:
+                yield cursor
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                cursor.close()
+        else:
+            cursor = conn.cursor()
+            try:
+                yield cursor
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
                 cursor.close()
     
     def close(self):
@@ -467,3 +476,75 @@ class Database:
                     for r in rows
                 ]
             return [dict(r) for r in rows]
+    
+    def execute_atomic_transfer(self, source_acc: str, dest_acc: str, amount: Decimal, transfer_id: str) -> bool:
+        now = datetime.utcnow().isoformat()
+        amount_float = float(amount)
+        
+        if USE_POSTGRES:
+            conn = self._pg_conn
+            if conn is None or conn.closed:
+                conn = psycopg2.connect(self._db_url)
+                self._pg_conn = conn
+            
+            cursor = conn.cursor()
+            try:
+                cursor.execute("BEGIN")
+                
+                cursor.execute(
+                    'UPDATE accounts SET balance = balance - %s WHERE "accountNumber" = %s AND balance >= %s',
+                    (amount_float, source_acc.upper(), amount_float)
+                )
+                
+                if cursor.rowcount == 0:
+                    cursor.execute("ROLLBACK")
+                    raise ValueError("INSUFFICIENT_FUNDS")
+                
+                cursor.execute(
+                    'UPDATE accounts SET balance = balance + %s WHERE "accountNumber" = %s',
+                    (amount_float, dest_acc.upper())
+                )
+                
+                cursor.execute(
+                    'INSERT INTO transfers ("transferId", status, "sourceAccount", "destinationAccount", amount, timestamp) VALUES (%s, %s, %s, %s, %s, %s)',
+                    (transfer_id, 'completed', source_acc.upper(), dest_acc.upper(), str(amount), now)
+                )
+                
+                conn.commit()
+                return True
+                
+            except Exception as e:
+                conn.rollback()
+                raise e
+            finally:
+                cursor.close()
+        else:
+            conn = self._connection
+            cursor = conn.cursor()
+            try:
+                cursor.execute(
+                    "UPDATE accounts SET balance = balance - ? WHERE accountNumber = ? AND balance >= ?",
+                    (amount_float, source_acc.upper(), amount_float)
+                )
+                
+                if cursor.rowcount == 0:
+                    raise ValueError("INSUFFICIENT_FUNDS")
+                
+                cursor.execute(
+                    "UPDATE accounts SET balance = balance + ? WHERE accountNumber = ?",
+                    (amount_float, dest_acc.upper())
+                )
+                
+                cursor.execute(
+                    "INSERT INTO transfers (transferId, status, sourceAccount, destinationAccount, amount, timestamp) VALUES (?, ?, ?, ?, ?, ?)",
+                    (transfer_id, 'completed', source_acc.upper(), dest_acc.upper(), str(amount), now)
+                )
+                
+                conn.commit()
+                return True
+                
+            except Exception as e:
+                conn.rollback()
+                raise e
+            finally:
+                cursor.close()

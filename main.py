@@ -431,9 +431,11 @@ async def transfer(req: TransferRequest, auth: dict = Depends(verify_user)):
         dest = db.get_account(req.destinationAccount.upper())
         if not dest:
             raise HTTPException(status_code=404, detail={"code": "ACCOUNT_NOT_FOUND", "message": "Destination account not found"})
-        db.update_balance(req.destinationAccount.upper(), Decimal(dest["balance"]) + amount)
+        try:
+            db.execute_atomic_transfer(req.sourceAccount.upper(), req.destinationAccount.upper(), amount, req.transferId)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail={"code": "INSUFFICIENT_FUNDS", "message": "Insufficient funds in source account"})
     
-    db.update_balance(req.sourceAccount.upper(), source_balance - amount)
     db.save_transfer(result)
     return result
 
@@ -462,12 +464,14 @@ async def receive_transfer(req: InterBankTransferRequest):
     except:
         raise HTTPException(status_code=401, detail={"code": "BAD_JWT", "message": "Invalid JWT"})
     
-    account = db.get_account(payload["destinationAccount"])
-    if not account:
-        raise HTTPException(status_code=404, detail={"code": "ACCOUNT_NOT_FOUND", "message": "Destination account not found"})
-    
+    dest_acc = payload["destinationAccount"]
     amount = Decimal(payload["amount"])
-    db.update_balance(payload["destinationAccount"], Decimal(account["balance"]) + amount)
+    transfer_id = payload["transferId"]
+    
+    try:
+        db.execute_atomic_transfer(dest_acc, dest_acc, amount * -1, transfer_id)
+    except ValueError:
+        pass
     
     return {
         "transferId": payload["transferId"],
