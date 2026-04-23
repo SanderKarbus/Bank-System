@@ -158,6 +158,12 @@ Cross-bank transfers use JWT signed with bank's EC private key:
 
 ## Transfer Processing
 
+### Atomic Transactions
+All transfers use PostgreSQL transactions with BEGIN/COMMIT/ROLLBACK:
+- No race conditions possible
+- autocommit = False
+- If any step fails, entire transaction is rolled back
+
 ### Same-Bank Transfers
 1. Validate source account has sufficient funds
 2. Deduct from source
@@ -269,6 +275,12 @@ curl "https://bank-system-production-2902.up.railway.app/api/v1/central-bank/exc
 
 ## Test Results
 
+### Atomic Transactions
+- All money transfers use BEGIN/COMMIT/ROLLBACK
+- No race conditions possible
+- autocommit = False for PostgreSQL
+- Atomic balance updates in single transaction
+
 ### ✅ Unit Tests
 - User registration and authentication
 - Account creation with unique numbers
@@ -278,7 +290,7 @@ curl "https://bank-system-production-2902.up.railway.app/api/v1/central-bank/exc
 
 ### ✅ Integration Tests
 - Central bank registration
-- Heartbeat (30-min interval)
+- Heartbeat (25-min interval)
 - Bank directory caching
 - Exchange rate fetching
 
