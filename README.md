@@ -21,12 +21,9 @@ Distributed Banking System branch bank that communicates with the central bank.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        Branch Bank API                          │
+│                   docker-compose.yml                             │
 ├─────────────────────────────────────────────────────────────────┤
-│  User Service     │ Account Service  │ Transfer Service         │
-│  - Registration  │ - Creation       │ - Same-bank transfers    │
-│  - Token auth    │ - Lookup         │ - Cross-bank transfers   │
-│                  │                  │ - Pending/retry logic    │
+│  user-service:8001  │ account-service:8002  │ transfer-service:8003│
 ├─────────────────────────────────────────────────────────────────┤
 │                      Central Bank Client                        │
 │  - Bank registration │ Heartbeat │ Bank directory (cached)    │
@@ -39,13 +36,11 @@ Distributed Banking System branch bank that communicates with the central bank.
 
 ### Service Components
 
-| Service | Responsibility |
-|---------|---------------|
-| `main.py` | FastAPI app, routing, business logic |
-| `database.py` | PostgreSQL operations, data persistence |
-| `central_bank_client.py` | Central Bank API integration |
-| `auth.py` | JWT token generation and verification |
-| `key_manager.py` | EC key pair for cross-bank JWT signing |
+| Service | Port | Responsibility |
+|---------|------|---------------|
+| user-service | 8001 | User registration, token auth |
+| account-service | 8002 | Account creation, lookup, deposit |
+| transfer-service | 8003 | Same-bank, cross-bank transfers |
 
 ## Database Schema
 
@@ -188,6 +183,22 @@ Exponential backoff: 1m → 2m → 4m → 8m → 16m → 32m → 1h
 
 ## Installation
 
+### Docker Compose (Microservices)
+```bash
+# Clone repo
+git clone https://github.com/SanderKarbus/Bank-System.git
+cd Bank-System
+
+# Run all services
+docker-compose up -d
+
+# Services will be available at:
+# - user-service: http://localhost:8001
+# - account-service: http://localhost:8002
+# - transfer-service: http://localhost:8003
+```
+
+### Local Development
 ```bash
 # Clone repo
 git clone https://github.com/SanderKarbus/Bank-System.git
