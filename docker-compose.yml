@@ -1,0 +1,25 @@
+version: '3.8'
+services:
+  user-service:
+    build: .
+    ports: ["8001:8000"]
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - SERVICE_NAME=user_service
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+
+  account-service:
+    build: .
+    ports: ["8002:8000"]
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - SERVICE_NAME=account_service
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+
+  transfer-service:
+    build: .
+    ports: ["8003:8000"]
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - SERVICE_NAME=transfer_service
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
